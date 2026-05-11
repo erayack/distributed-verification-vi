@@ -171,6 +171,60 @@ class Verifier:
         if node not in graph.nodes():
             raise ValueError(f"{label}={node} is not a node in G")
 
+    def _validate_le_list_inputs(
+        self,
+        graph: nx.Graph,
+        task: VerificationTask,
+        graph_input: GraphInput,
+    ) -> tuple[NodeId, list[tuple[NodeId, float]], dict[NodeId, int], set[NodeId]]:
+        if task.target is None:
+            raise ValueError("least_element_list requires target")
+        if task.le_list is None:
+            raise ValueError("least_element_list requires le_list")
+
+        nodes = set(cast("Iterable[NodeId]", graph.nodes()))
+        if task.target not in nodes:
+            raise ValueError("target must be a node in G")
+        if graph_input.ranks is None:
+            raise ValueError("least_element_list requires ranks in GraphInput")
+        if set(graph_input.ranks.keys()) != nodes:
+            raise ValueError("ranks must be provided for all nodes in G")
+        if len(set(graph_input.ranks.values())) != len(graph_input.ranks):
+            raise ValueError("ranks must be distinct")
+
+        return task.target, task.le_list, graph_input.ranks, nodes
+
+    def _expected_le_list(
+        self,
+        weighted_graph: nx.Graph,
+        target: NodeId,
+        ranks: Mapping[NodeId, int],
+    ) -> dict[NodeId, float]:
+        distances = nx.single_source_dijkstra_path_length(weighted_graph, target, weight="weight")
+        expected: dict[NodeId, float] = {}
+        best_rank_so_far: int | None = None
+        for node, dist in sorted(distances.items(), key=lambda item: (item[1], repr(item[0]))):
+            node_rank = ranks[node]
+            if best_rank_so_far is None or node_rank < best_rank_so_far:
+                expected[node] = float(dist)
+                best_rank_so_far = node_rank
+        return expected
+
+    def _provided_le_list(
+        self,
+        le_list: Iterable[tuple[NodeId, float]],
+        nodes: set[NodeId],
+    ) -> dict[NodeId, float]:
+        provided: dict[NodeId, float] = {}
+        for node, dist in le_list:
+            if node not in nodes:
+                raise ValueError(f"LE-list node {node} is not in G")
+            dist_f = float(dist)
+            if node in provided and abs(provided[node] - dist_f) > 1e-9:
+                raise ValueError(f"conflicting duplicate LE-list distance for node {node}")
+            provided[node] = dist_f
+        return provided
+
     def verify_cut(
         self, g_graph: nx.Graph, h_graph: nx.Graph, _: VerificationTask
     ) -> tuple[bool, dict[str, object]]:
@@ -324,40 +378,10 @@ class Verifier:
         task: VerificationTask,
         graph_input: GraphInput,
     ) -> tuple[bool, dict[str, object]]:
-        if task.target is None:
-            raise ValueError("least_element_list requires target")
-        if task.le_list is None:
-            raise ValueError("least_element_list requires le_list")
-        if task.target not in g_graph.nodes():
-            raise ValueError("target must be a node in G")
-        if graph_input.ranks is None:
-            raise ValueError("least_element_list requires ranks in GraphInput")
-        ranks = graph_input.ranks
-        if set(ranks.keys()) != set(g_graph.nodes()):
-            raise ValueError("ranks must be provided for all nodes in G")
-        if len(set(ranks.values())) != len(ranks):
-            raise ValueError("ranks must be distinct")
-
+        target, le_list, ranks, nodes = self._validate_le_list_inputs(g_graph, task, graph_input)
         weighted_graph = attach_edge_weights(g_graph, graph_input.edge_weights)
-        distances = nx.single_source_dijkstra_path_length(weighted_graph, task.target, weight="weight")
-
-        expected: dict[NodeId, float] = {}
-        best_rank_so_far: int | None = None
-        for _, node in sorted(((dist, node) for node, dist in distances.items()), key=lambda x: (x[0], repr(x[1]))):
-            node_rank = ranks[node]
-            if best_rank_so_far is None or node_rank < best_rank_so_far:
-                expected[node] = float(distances[node])
-                best_rank_so_far = node_rank
-
-        provided: dict[NodeId, float] = {}
-        for node, dist in task.le_list:
-            if node not in g_graph.nodes():
-                raise ValueError(f"LE-list node {node} is not in G")
-            dist_f = float(dist)
-            if node in provided and abs(provided[node] - dist_f) > 1e-9:
-                raise ValueError(f"conflicting duplicate LE-list distance for node {node}")
-            provided[node] = dist_f
-
+        expected = self._expected_le_list(weighted_graph, target, ranks)
+        provided = self._provided_le_list(le_list, nodes)
         missing_nodes = [node for node in expected if node not in provided]
         extra_nodes = [node for node in provided if node not in expected]
         distance_mismatches = [
@@ -368,7 +392,7 @@ class Verifier:
         verdict = not missing_nodes and not extra_nodes and not distance_mismatches
         return verdict, self._with_paper_meta(
             {
-                "target": task.target,
+                "target": target,
                 "provided_count": len(provided),
                 "expected_count": len(expected),
                 "missing_nodes": sorted(missing_nodes, key=repr),

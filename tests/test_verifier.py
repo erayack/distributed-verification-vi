@@ -210,6 +210,78 @@ def test_least_element_list_validation_errors() -> None:
         verifier.verify(bad_ranks, VerificationTask("least_element_list", target=1, le_list=[(1, 0.0)]))
 
 
+@pytest.mark.parametrize(
+    ("graph_input", "task", "message"),
+    [
+        (
+            _le_list_graph_input(),
+            VerificationTask("least_element_list", le_list=[(1, 0.0)]),
+            "least_element_list requires target",
+        ),
+        (
+            _le_list_graph_input(),
+            VerificationTask("least_element_list", target=1),
+            "least_element_list requires le_list",
+        ),
+        (
+            _le_list_graph_input(),
+            VerificationTask("least_element_list", target=99, le_list=[]),
+            "target must be a node in G",
+        ),
+        (
+            GraphInput(nodes={1, 2}, edges={(1, 2)}, subgraph_edges=set()),
+            VerificationTask("least_element_list", target=1, le_list=[]),
+            "least_element_list requires ranks in GraphInput",
+        ),
+        (
+            GraphInput(nodes={1, 2}, edges={(1, 2)}, subgraph_edges=set(), ranks={1: 1}),
+            VerificationTask("least_element_list", target=1, le_list=[]),
+            "ranks must be provided for all nodes in G",
+        ),
+        (
+            GraphInput(nodes={1, 2}, edges={(1, 2)}, subgraph_edges=set(), ranks={1: 1, 2: 1}),
+            VerificationTask("least_element_list", target=1, le_list=[]),
+            "ranks must be distinct",
+        ),
+        (
+            _le_list_graph_input(),
+            VerificationTask("least_element_list", target=1, le_list=[(99, 0.0)]),
+            "LE-list node 99 is not in G",
+        ),
+        (
+            _le_list_graph_input(),
+            VerificationTask("least_element_list", target=1, le_list=[(1, 0.0), (1, 1.0)]),
+            "conflicting duplicate LE-list distance for node 1",
+        ),
+    ],
+)
+def test_least_element_list_validation_error_messages(
+    graph_input: GraphInput,
+    task: VerificationTask,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=f"^{message}$"):
+        Verifier().verify(graph_input, task)
+
+
+def test_least_element_list_details_key_parity() -> None:
+    details = Verifier().verify(
+        _le_list_graph_input(),
+        VerificationTask("least_element_list", target=1, le_list=[(1, 0.0), (2, 1.0)]),
+    ).details
+    assert set(details) == {
+        "target",
+        "provided_count",
+        "expected_count",
+        "missing_nodes",
+        "extra_nodes",
+        "distance_mismatches",
+        "paper_section",
+        "paper_rule",
+        "fidelity",
+    }
+
+
 def test_all_predicates_include_paper_metadata() -> None:
     verifier = Verifier()
     checks = [
