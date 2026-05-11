@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
-from .types import GraphInput, VerificationTask, canonical_edge
+from .graph_ops import first_edge_by_repr
+from .types import GraphInput, PredicateName, VerificationTask, canonical_edge
 from .verifier import Verifier
 
 
@@ -64,16 +65,12 @@ def compute_deterministic_lb(inp: LowerBoundInput) -> LowerBoundResult:
 
 
 def _deterministic_h_minus_edge(graph_input: GraphInput) -> GraphInput:
-    edges = sorted((canonical_edge(u, v) for u, v in graph_input.subgraph_edges), key=lambda edge: (repr(edge[0]), repr(edge[1])))
-    if not edges:
+    removed = first_edge_by_repr(graph_input.subgraph_edges)
+    if removed is None:
         return graph_input
-    removed = edges[0]
-    return GraphInput(
-        nodes=set(graph_input.nodes),
-        edges=set(graph_input.edges),
+    return replace(
+        graph_input,
         subgraph_edges={edge for edge in graph_input.subgraph_edges if canonical_edge(*edge) != removed},
-        edge_weights=None if graph_input.edge_weights is None else dict(graph_input.edge_weights),
-        ranks=None if graph_input.ranks is None else dict(graph_input.ranks),
     )
 
 
@@ -131,28 +128,24 @@ def _hamiltonian_witnesses() -> list[ReductionWitness]:
     ]
 
 
-def _reduction_hamiltonian_to_spanning_tree() -> ReductionCheckResult:
+def _reduction_hamiltonian_via(predicate: PredicateName) -> ReductionCheckResult:
     verifier = Verifier()
-    witnesses = _hamiltonian_witnesses()
+    target_task = VerificationTask(predicate)
     return check_reduction_equivalence(
-        reduction_name="hamiltonian_cycle_via_spanning_tree",
-        witnesses=witnesses,
+        reduction_name=f"hamiltonian_cycle_via_{predicate}",
+        witnesses=_hamiltonian_witnesses(),
         lhs_verdict=lambda witness: verifier.verify(witness.graph_input, VerificationTask("hamiltonian_cycle")).verdict,
         rhs_verdict=lambda witness: _all_degree_two(witness.graph_input)
-        and verifier.verify(_deterministic_h_minus_edge(witness.graph_input), VerificationTask("spanning_tree")).verdict,
+        and verifier.verify(_deterministic_h_minus_edge(witness.graph_input), target_task).verdict,
     )
+
+
+def _reduction_hamiltonian_to_spanning_tree() -> ReductionCheckResult:
+    return _reduction_hamiltonian_via("spanning_tree")
 
 
 def _reduction_hamiltonian_to_simple_path() -> ReductionCheckResult:
-    verifier = Verifier()
-    witnesses = _hamiltonian_witnesses()
-    return check_reduction_equivalence(
-        reduction_name="hamiltonian_cycle_via_simple_path",
-        witnesses=witnesses,
-        lhs_verdict=lambda witness: verifier.verify(witness.graph_input, VerificationTask("hamiltonian_cycle")).verdict,
-        rhs_verdict=lambda witness: _all_degree_two(witness.graph_input)
-        and verifier.verify(_deterministic_h_minus_edge(witness.graph_input), VerificationTask("simple_path")).verdict,
-    )
+    return _reduction_hamiltonian_via("simple_path")
 
 
 def run_reduction_reproduction_suite() -> list[ReductionCheckResult]:

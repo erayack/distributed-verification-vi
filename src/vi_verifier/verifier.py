@@ -12,12 +12,31 @@ from .graph_ops import (
     build_weighted_transform_for_mst,
     count_zero_weight_edges,
     edge_count,
+    first_edge_by_repr,
+    graph_edge_set,
+    graph_minus_edges,
     incident_vertex_count,
     mst_of_transformed_graph,
     total_mst_weight,
 )
 from .paper_compat import get_paper_compat_row
-from .types import GraphInput, NodeId, VerificationResult, VerificationTask, canonical_edge
+from .types import Edge, GraphInput, NodeId, VerificationResult, VerificationTask, canonical_edge
+
+VALID_PREDICATES = (
+    "bipartiteness",
+    "connectivity",
+    "cut",
+    "cycle_containment",
+    "e_cycle_containment",
+    "edge_on_all_paths",
+    "hamiltonian_cycle",
+    "least_element_list",
+    "simple_path",
+    "spanning_connected_subgraph",
+    "spanning_tree",
+    "st_connectivity",
+    "st_cut",
+)
 
 
 class Verifier:
@@ -37,27 +56,44 @@ class Verifier:
         g_input = graph_input.canonicalized()
         g_graph = build_graph(g_input.nodes, g_input.edges)
         h_graph = build_subgraph(g_graph, g_input.subgraph_edges)
-        method_map = {
-            "spanning_connected_subgraph": self.verify_spanning_connected_subgraph,
-            "spanning_tree": self.verify_spanning_tree,
-            "cycle_containment": self.verify_cycle_containment,
-            "connectivity": self.verify_connectivity,
-            "cut": self.verify_cut,
-            "st_connectivity": self.verify_st_connectivity,
-            "st_cut": self.verify_st_cut,
-            "edge_on_all_paths": self.verify_edge_on_all_paths,
-            "e_cycle_containment": self.verify_e_cycle,
-            "bipartiteness": self.verify_bipartiteness,
-            "simple_path": self.verify_simple_path,
-            "hamiltonian_cycle": self.verify_hamiltonian_cycle,
-            "least_element_list": lambda gg, hh, tt: self.verify_least_element_list(gg, hh, tt, g_input),
-        }
-        fn = method_map.get(task.predicate)
-        if fn is None:
-            valid = ", ".join(sorted(method_map.keys()))
-            raise ValueError(f"unsupported predicate '{task.predicate}'. valid predicates: {valid}")
-        verdict, details = fn(g_graph, h_graph, task)
+        verdict, details = self._verify_canonical(g_graph, h_graph, task, g_input)
         return VerificationResult(predicate=task.predicate, verdict=verdict, details=details)
+
+    def _verify_canonical(
+        self,
+        g_graph: nx.Graph,
+        h_graph: nx.Graph,
+        task: VerificationTask,
+        graph_input: GraphInput,
+    ) -> tuple[bool, dict[str, object]]:
+        if task.predicate == "spanning_connected_subgraph":
+            return self.verify_spanning_connected_subgraph(g_graph, h_graph, task)
+        if task.predicate == "spanning_tree":
+            return self.verify_spanning_tree(g_graph, h_graph, task)
+        if task.predicate == "cycle_containment":
+            return self.verify_cycle_containment(g_graph, h_graph, task)
+        if task.predicate == "connectivity":
+            return self.verify_connectivity(g_graph, h_graph, task)
+        if task.predicate == "cut":
+            return self.verify_cut(g_graph, h_graph, task)
+        if task.predicate == "st_connectivity":
+            return self.verify_st_connectivity(g_graph, h_graph, task)
+        if task.predicate == "st_cut":
+            return self.verify_st_cut(g_graph, h_graph, task)
+        if task.predicate == "edge_on_all_paths":
+            return self.verify_edge_on_all_paths(g_graph, h_graph, task)
+        if task.predicate == "e_cycle_containment":
+            return self.verify_e_cycle(g_graph, h_graph, task)
+        if task.predicate == "bipartiteness":
+            return self.verify_bipartiteness(g_graph, h_graph, task)
+        if task.predicate == "simple_path":
+            return self.verify_simple_path(g_graph, h_graph, task)
+        if task.predicate == "hamiltonian_cycle":
+            return self.verify_hamiltonian_cycle(g_graph, h_graph, task)
+        if task.predicate == "least_element_list":
+            return self.verify_least_element_list(g_graph, h_graph, task, graph_input)
+        valid = ", ".join(VALID_PREDICATES)
+        raise ValueError(f"unsupported predicate '{task.predicate}'. valid predicates: {valid}")
 
     def _mst_summary(self, g_graph: nx.Graph, h_graph: nx.Graph) -> dict[str, int]:
         g_prime = build_weighted_transform_for_mst(g_graph, h_graph)
@@ -124,14 +160,12 @@ class Verifier:
         )
 
     def _graph_minus_h(self, g_graph: nx.Graph, h_graph: nx.Graph) -> nx.Graph:
-        minus = nx.Graph()
-        minus.add_nodes_from(g_graph.nodes())
-        h_edges = {canonical_edge(u, v) for u, v in h_graph.edges()}
-        for u, v in g_graph.edges():
-            edge = canonical_edge(u, v)
-            if edge not in h_edges:
-                minus.add_edge(*edge)
-        return minus
+        return graph_minus_edges(g_graph, graph_edge_set(h_graph))
+
+    def _remove_h_edge(self, h_graph: nx.Graph, edge: Edge) -> nx.Graph:
+        if edge not in graph_edge_set(h_graph):
+            raise ValueError("e must be an edge in H")
+        return graph_minus_edges(h_graph, {edge})
 
     def _validate_node(self, graph: nx.Graph, node: NodeId, label: str) -> None:
         if node not in graph.nodes():
@@ -182,10 +216,7 @@ class Verifier:
         self._validate_node(g_graph, task.u, "u")
         self._validate_node(g_graph, task.v, "v")
         edge = canonical_edge(*task.e)
-        if edge not in {canonical_edge(a, b) for a, b in h_graph.edges()}:
-            raise ValueError("e must be an edge in H")
-        h_minus = h_graph.copy()
-        h_minus.remove_edge(*edge)
+        h_minus = self._remove_h_edge(h_graph, edge)
         has_path = nx.has_path(h_minus, task.u, task.v)
         return (not has_path), self._with_paper_meta(
             {"u": task.u, "v": task.v, "removed_edge": edge},
@@ -198,10 +229,7 @@ class Verifier:
         if task.e is None:
             raise ValueError("e_cycle_containment requires e")
         edge = canonical_edge(*task.e)
-        if edge not in {canonical_edge(a, b) for a, b in h_graph.edges()}:
-            raise ValueError("e must be an edge in H")
-        h_minus = h_graph.copy()
-        h_minus.remove_edge(*edge)
+        h_minus = self._remove_h_edge(h_graph, edge)
         in_cycle = nx.has_path(h_minus, edge[0], edge[1])
         return in_cycle, self._with_paper_meta(
             {"removed_edge": edge},
@@ -273,12 +301,10 @@ class Verifier:
                 predicate="hamiltonian_cycle",
             )
 
-        # Deterministic reduction from the paper: H is Hamiltonian cycle iff
-        # every node has degree two and H\{e} is a spanning tree for any edge e.
-        # Deterministic edge selection keeps results reproducible across runs.
-        edge = sorted((canonical_edge(u, v) for u, v in h_graph.edges()), key=lambda x: (repr(x[0]), repr(x[1])))[0]
-        h_minus = h_graph.copy()
-        h_minus.remove_edge(*edge)
+        edge = first_edge_by_repr(h_graph.edges())
+        if edge is None:
+            raise ValueError("hamiltonian_cycle requires at least one edge after preconditions")
+        h_minus = graph_minus_edges(h_graph, {edge})
         spanning_tree_verdict, _ = self._is_spanning_tree_graph(g_graph, h_minus)
         return spanning_tree_verdict, self._with_paper_meta(
             {

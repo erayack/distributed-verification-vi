@@ -1,8 +1,29 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 import networkx as nx
 
 from .types import Edge, NodeId, canonical_edge
+
+
+def graph_edge_set(graph: nx.Graph) -> set[Edge]:
+    return {canonical_edge(u, v) for u, v in graph.edges()}
+
+
+def first_edge_by_repr(edges: Iterable[Edge]) -> Edge | None:
+    canonical_edges = (canonical_edge(u, v) for u, v in edges)
+    return min(canonical_edges, key=lambda edge: (repr(edge[0]), repr(edge[1])), default=None)
+
+
+def graph_minus_edges(base_graph: nx.Graph, removed_edges: set[Edge]) -> nx.Graph:
+    minus = nx.Graph()
+    minus.add_nodes_from(base_graph.nodes())
+    for u, v in base_graph.edges():
+        edge = canonical_edge(u, v)
+        if edge not in removed_edges:
+            minus.add_edge(*edge)
+    return minus
 
 
 def build_graph(nodes: set[NodeId], edges: set[Edge]) -> nx.Graph:
@@ -18,7 +39,7 @@ def build_graph(nodes: set[NodeId], edges: set[Edge]) -> nx.Graph:
 def build_subgraph(base_graph: nx.Graph, subgraph_edges: set[Edge]) -> nx.Graph:
     h_graph = nx.Graph()
     h_graph.add_nodes_from(base_graph.nodes())
-    base_edge_set = {canonical_edge(u, v) for u, v in base_graph.edges()}
+    base_edge_set = graph_edge_set(base_graph)
     for u, v in subgraph_edges:
         edge = canonical_edge(u, v)
         if edge not in base_edge_set:
@@ -30,7 +51,7 @@ def build_subgraph(base_graph: nx.Graph, subgraph_edges: set[Edge]) -> nx.Graph:
 def build_weighted_transform_for_mst(g_graph: nx.Graph, h_graph: nx.Graph) -> nx.Graph:
     g_prime = nx.Graph()
     g_prime.add_nodes_from(g_graph.nodes())
-    h_edges = {canonical_edge(u, v) for u, v in h_graph.edges()}
+    h_edges = graph_edge_set(h_graph)
     for u, v in g_graph.edges():
         edge = canonical_edge(u, v)
         weight = 0 if edge in h_edges else 1
