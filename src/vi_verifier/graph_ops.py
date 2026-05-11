@@ -38,6 +38,18 @@ def build_weighted_transform_for_mst(g_graph: nx.Graph, h_graph: nx.Graph) -> nx
     return g_prime
 
 
+def attach_edge_weights(g_graph: nx.Graph, edge_weights: dict[Edge, float] | None) -> nx.Graph:
+    weighted = nx.Graph()
+    weighted.add_nodes_from(g_graph.nodes())
+    for u, v in g_graph.edges():
+        edge = canonical_edge(u, v)
+        weight = 1.0 if edge_weights is None else edge_weights.get(edge, 1.0)
+        if weight < 0:
+            raise ValueError(f"edge {edge} has negative weight")
+        weighted.add_edge(*edge, weight=weight)
+    return weighted
+
+
 def mst_of_transformed_graph(g_prime: nx.Graph) -> nx.Graph:
     if g_prime.number_of_nodes() == 0:
         return nx.Graph()

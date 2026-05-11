@@ -20,6 +20,8 @@ vi-verify run-case --case spanning_tree_true
 vi-verify run-suite
 vi-verify paper-matrix
 vi-verify paper-matrix --format json
+vi-verify reproduce-lower-bounds
+vi-verify reproduce-lower-bounds --format json --p 2 --B 3 --n 192
 ```
 
 ## Library usage
@@ -53,6 +55,7 @@ Implemented predicates:
 - bipartiteness
 - simple path
 - Hamiltonian cycle
+- least-element-list
 
 ### Assumptions
 
@@ -63,10 +66,6 @@ Implemented predicates:
 
 ### Deferred
 
-- Lower-bound proof reproduction
 - Communication-complexity simulations
 - CONGEST / B-model round simulation
-- Least-element-list verification
 - Large-scale benchmarks / fuzzing
-
-

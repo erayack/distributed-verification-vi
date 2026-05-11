@@ -38,11 +38,24 @@ def _two_cycle_components_graph() -> GraphInput:
     return GraphInput(nodes=nodes, edges=edges, subgraph_edges=set())
 
 
+def _le_list_graph() -> GraphInput:
+    nodes: set[NodeId] = {1, 2, 3}
+    edges: set[Edge] = {(1, 2), (2, 3), (1, 3)}
+    return GraphInput(
+        nodes=nodes,
+        edges=edges,
+        subgraph_edges=set(),
+        edge_weights={(1, 2): 1.0, (2, 3): 1.0, (1, 3): 3.0},
+        ranks={1: 5, 2: 1, 3: 3},
+    )
+
+
 def get_eval_cases() -> list[EvalCase]:
     base = _base_graph()
     tri = _triangle_graph()
     cyc = _cycle_graph()
     two_cyc = _two_cycle_components_graph()
+    le_graph = _le_list_graph()
     return [
         EvalCase(
             name="spanning_tree_true",
@@ -148,6 +161,22 @@ def get_eval_cases() -> list[EvalCase]:
                 {(1, 2), (2, 3), (3, 1), (4, 5), (5, 6), (6, 4)},
             ),
             task=VerificationTask(predicate="hamiltonian_cycle"),
+            expected=False,
+        ),
+        EvalCase(
+            name="least_element_list_true",
+            graph_input=le_graph,
+            task=VerificationTask(predicate="least_element_list", target=1, le_list=[(1, 0.0), (2, 1.0)]),
+            expected=True,
+        ),
+        EvalCase(
+            name="least_element_list_false_extra_node",
+            graph_input=le_graph,
+            task=VerificationTask(
+                predicate="least_element_list",
+                target=1,
+                le_list=[(1, 0.0), (2, 1.0), (3, 2.0)],
+            ),
             expected=False,
         ),
     ]

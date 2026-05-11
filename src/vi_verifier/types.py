@@ -19,6 +19,7 @@ PredicateName = Literal[
     "bipartiteness",
     "simple_path",
     "hamiltonian_cycle",
+    "least_element_list",
 ]
 
 PaperFidelity = Literal["implemented", "approximated", "deferred"]
@@ -41,12 +42,30 @@ class GraphInput:
     nodes: set[NodeId]
     edges: set[Edge]
     subgraph_edges: set[Edge]
+    edge_weights: dict[Edge, float] | None = None
+    ranks: dict[NodeId, int] | None = None
 
     def canonicalized(self) -> GraphInput:
+        canonical_edges = canonicalize_edges(set(self.edges))
+        canonical_subgraph_edges = canonicalize_edges(set(self.subgraph_edges))
+        canonical_weights: dict[Edge, float] | None = None
+        if self.edge_weights is not None:
+            canonical_weights = {}
+            for (u, v), weight in self.edge_weights.items():
+                edge = canonical_edge(u, v)
+                if edge in canonical_weights and canonical_weights[edge] != weight:
+                    raise ValueError(f"conflicting weights for edge {edge}")
+                canonical_weights[edge] = float(weight)
+            unknown_weight_edges = set(canonical_weights.keys()) - canonical_edges
+            if unknown_weight_edges:
+                unknown = sorted(unknown_weight_edges, key=repr)
+                raise ValueError(f"edge_weights include edges not in edges: {unknown}")
         return GraphInput(
             nodes=set(self.nodes),
-            edges=canonicalize_edges(set(self.edges)),
-            subgraph_edges=canonicalize_edges(set(self.subgraph_edges)),
+            edges=canonical_edges,
+            subgraph_edges=canonical_subgraph_edges,
+            edge_weights=canonical_weights,
+            ranks=None if self.ranks is None else dict(self.ranks),
         )
 
 
@@ -58,6 +77,8 @@ class VerificationTask:
     u: NodeId | None = None
     v: NodeId | None = None
     e: Edge | None = None
+    target: NodeId | None = None
+    le_list: list[tuple[NodeId, float]] | None = None
 
 
 @dataclass(frozen=True)

@@ -6,6 +6,7 @@ from typing import cast
 import networkx as nx
 
 from .graph_ops import (
+    attach_edge_weights,
     build_graph,
     build_subgraph,
     build_weighted_transform_for_mst,
@@ -36,7 +37,6 @@ class Verifier:
         g_input = graph_input.canonicalized()
         g_graph = build_graph(g_input.nodes, g_input.edges)
         h_graph = build_subgraph(g_graph, g_input.subgraph_edges)
-
         method_map = {
             "spanning_connected_subgraph": self.verify_spanning_connected_subgraph,
             "spanning_tree": self.verify_spanning_tree,
@@ -50,6 +50,7 @@ class Verifier:
             "bipartiteness": self.verify_bipartiteness,
             "simple_path": self.verify_simple_path,
             "hamiltonian_cycle": self.verify_hamiltonian_cycle,
+            "least_element_list": lambda gg, hh, tt: self.verify_least_element_list(gg, hh, tt, g_input),
         }
         fn = method_map.get(task.predicate)
         if fn is None:
@@ -288,4 +289,65 @@ class Verifier:
                 "h_minus_spanning_tree": spanning_tree_verdict,
             },
             predicate="hamiltonian_cycle",
+        )
+
+    def verify_least_element_list(
+        self,
+        g_graph: nx.Graph,
+        _: nx.Graph,
+        task: VerificationTask,
+        graph_input: GraphInput,
+    ) -> tuple[bool, dict[str, object]]:
+        if task.target is None:
+            raise ValueError("least_element_list requires target")
+        if task.le_list is None:
+            raise ValueError("least_element_list requires le_list")
+        if task.target not in g_graph.nodes():
+            raise ValueError("target must be a node in G")
+        if graph_input.ranks is None:
+            raise ValueError("least_element_list requires ranks in GraphInput")
+        ranks = graph_input.ranks
+        if set(ranks.keys()) != set(g_graph.nodes()):
+            raise ValueError("ranks must be provided for all nodes in G")
+        if len(set(ranks.values())) != len(ranks):
+            raise ValueError("ranks must be distinct")
+
+        weighted_graph = attach_edge_weights(g_graph, graph_input.edge_weights)
+        distances = nx.single_source_dijkstra_path_length(weighted_graph, task.target, weight="weight")
+
+        expected: dict[NodeId, float] = {}
+        best_rank_so_far: int | None = None
+        for _, node in sorted(((dist, node) for node, dist in distances.items()), key=lambda x: (x[0], repr(x[1]))):
+            node_rank = ranks[node]
+            if best_rank_so_far is None or node_rank < best_rank_so_far:
+                expected[node] = float(distances[node])
+                best_rank_so_far = node_rank
+
+        provided: dict[NodeId, float] = {}
+        for node, dist in task.le_list:
+            if node not in g_graph.nodes():
+                raise ValueError(f"LE-list node {node} is not in G")
+            dist_f = float(dist)
+            if node in provided and abs(provided[node] - dist_f) > 1e-9:
+                raise ValueError(f"conflicting duplicate LE-list distance for node {node}")
+            provided[node] = dist_f
+
+        missing_nodes = [node for node in expected if node not in provided]
+        extra_nodes = [node for node in provided if node not in expected]
+        distance_mismatches = [
+            node
+            for node in expected
+            if node in provided and abs(expected[node] - provided[node]) > 1e-9
+        ]
+        verdict = not missing_nodes and not extra_nodes and not distance_mismatches
+        return verdict, self._with_paper_meta(
+            {
+                "target": task.target,
+                "provided_count": len(provided),
+                "expected_count": len(expected),
+                "missing_nodes": sorted(missing_nodes, key=repr),
+                "extra_nodes": sorted(extra_nodes, key=repr),
+                "distance_mismatches": sorted(distance_mismatches, key=repr),
+            },
+            predicate="least_element_list",
         )

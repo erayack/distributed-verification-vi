@@ -117,9 +117,9 @@ def get_paper_compat_rows() -> list[PaperCompatRow]:
             predicate="least_element_list",
             paper_section="paper/prelim.tex",
             paper_rule="LE-list verification definition",
-            status="deferred",
-            implementation_hook=None,
-            notes="Out of scope in v1/v2.",
+            status="implemented",
+            implementation_hook="Verifier.verify_least_element_list",
+            notes="Centralized weighted-distance and distinct-rank LE-list exact check.",
         ),
     ]
 

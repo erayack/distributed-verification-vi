@@ -40,6 +40,16 @@ def _two_cycle_components_graph_input(subgraph_edges: set[Edge]) -> GraphInput:
     return GraphInput(nodes=nodes, edges=edges, subgraph_edges=subgraph_edges)
 
 
+def _le_list_graph_input() -> GraphInput:
+    return GraphInput(
+        nodes={1, 2, 3},
+        edges={(1, 2), (2, 3), (1, 3)},
+        subgraph_edges=set(),
+        edge_weights={(1, 2): 1.0, (2, 3): 1.0, (1, 3): 3.0},
+        ranks={1: 5, 2: 1, 3: 3},
+    )
+
+
 def _h_graph(gi: GraphInput) -> nx.Graph:
     h = nx.Graph()
     h.add_nodes_from(gi.nodes)
@@ -176,6 +186,30 @@ def test_hamiltonian_cycle_has_paper_metadata() -> None:
     assert details["fidelity"] == row.status
 
 
+def test_least_element_list_true_and_false() -> None:
+    verifier = Verifier()
+    graph_input = _le_list_graph_input()
+    true_task = VerificationTask("least_element_list", target=1, le_list=[(1, 0.0), (2, 1.0)])
+    false_task = VerificationTask("least_element_list", target=1, le_list=[(1, 0.0), (2, 1.0), (3, 2.0)])
+    assert verifier.verify(graph_input, true_task).verdict is True
+    assert verifier.verify(graph_input, false_task).verdict is False
+
+
+def test_least_element_list_validation_errors() -> None:
+    verifier = Verifier()
+    graph_input = _le_list_graph_input()
+    with pytest.raises(ValueError):
+        verifier.verify(graph_input, VerificationTask("least_element_list", target=1))
+    bad_ranks = GraphInput(
+        nodes={1, 2},
+        edges={(1, 2)},
+        subgraph_edges=set(),
+        ranks={1: 1, 2: 1},
+    )
+    with pytest.raises(ValueError):
+        verifier.verify(bad_ranks, VerificationTask("least_element_list", target=1, le_list=[(1, 0.0)]))
+
+
 def test_all_predicates_include_paper_metadata() -> None:
     verifier = Verifier()
     checks = [
@@ -191,6 +225,7 @@ def test_all_predicates_include_paper_metadata() -> None:
         (_graph_input({(1, 2), (2, 3), (3, 4)}), VerificationTask("bipartiteness")),
         (_graph_input({(1, 2), (2, 3), (3, 4)}), VerificationTask("simple_path")),
         (_cycle_graph_input({(1, 2), (2, 3), (3, 4), (4, 1)}), VerificationTask("hamiltonian_cycle")),
+        (_le_list_graph_input(), VerificationTask("least_element_list", target=1, le_list=[(1, 0.0), (2, 1.0)])),
     ]
     for graph_input, task in checks:
         details = verifier.verify(graph_input, task).details
@@ -214,6 +249,7 @@ def test_predicate_metadata_matches_paper_registry() -> None:
         (_graph_input({(1, 2), (2, 3), (3, 4)}), VerificationTask("bipartiteness")),
         (_graph_input({(1, 2), (2, 3), (3, 4)}), VerificationTask("simple_path")),
         (_cycle_graph_input({(1, 2), (2, 3), (3, 4), (4, 1)}), VerificationTask("hamiltonian_cycle")),
+        (_le_list_graph_input(), VerificationTask("least_element_list", target=1, le_list=[(1, 0.0), (2, 1.0)])),
     ]
     for graph_input, task in checks:
         details = verifier.verify(graph_input, task).details
@@ -229,10 +265,12 @@ def test_paper_matrix_contains_expected_rows() -> None:
     assert "simple_path" in names
     assert "spanning_tree" in names
     assert "hamiltonian_cycle" in names
-    assert any(row.status == "deferred" for row in rows)
+    assert "least_element_list" in names
     assert any(row.status == "approximated" for row in rows)
     ham = get_paper_compat_row("hamiltonian_cycle")
     assert ham.status == "implemented"
+    le_list = get_paper_compat_row("least_element_list")
+    assert le_list.status == "implemented"
 
 
 def test_input_validation_errors() -> None:
@@ -246,6 +284,9 @@ def test_input_validation_errors() -> None:
         verifier.verify(good, VerificationTask("st_connectivity", s=1))
     with pytest.raises(ValueError):
         verifier.verify(good, VerificationTask("e_cycle_containment", e=(1, 3)))
+    bad_weights = GraphInput(nodes={1, 2}, edges={(1, 2)}, subgraph_edges=set(), edge_weights={(1, 3): 5.0})
+    with pytest.raises(ValueError):
+        verifier.verify(bad_weights, VerificationTask("connectivity"))
     with pytest.raises(ValueError):
         verifier.verify(good, VerificationTask(predicate="not_supported"))  # type: ignore[arg-type]
 
@@ -256,6 +297,10 @@ def test_cli_unknown_case_exit_code() -> None:
 
 def test_cli_paper_matrix_exit_code() -> None:
     assert cli_main(["paper-matrix"]) == 0
+
+
+def test_cli_reproduce_lower_bounds_exit_code() -> None:
+    assert cli_main(["reproduce-lower-bounds"]) == 0
 
 
 def test_cli_paper_matrix_output_shape(capsys: pytest.CaptureFixture[str]) -> None:
@@ -291,12 +336,14 @@ def test_non_deferred_rows_are_dispatchable_and_covered() -> None:
         "bipartiteness": _graph_input({(1, 2), (2, 3), (3, 4)}),
         "simple_path": _graph_input({(1, 2), (2, 3), (3, 4)}),
         "hamiltonian_cycle": _cycle_graph_input({(1, 2), (2, 3), (3, 4), (4, 1)}),
+        "least_element_list": _le_list_graph_input(),
     }
     tasks = {
         "st_connectivity": VerificationTask("st_connectivity", s=1, t=3),
         "st_cut": VerificationTask("st_cut", s=1, t=3),
         "edge_on_all_paths": VerificationTask("edge_on_all_paths", u=1, v=4, e=(2, 3)),
         "e_cycle_containment": VerificationTask("e_cycle_containment", e=(1, 2)),
+        "least_element_list": VerificationTask("least_element_list", target=1, le_list=[(1, 0.0), (2, 1.0)]),
     }
     eval_case_predicates = {case.task.predicate for case in get_eval_cases()}
     for row in rows:
