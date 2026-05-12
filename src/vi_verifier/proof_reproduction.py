@@ -64,13 +64,52 @@ def compute_deterministic_lb(inp: LowerBoundInput) -> LowerBoundResult:
     )
 
 
+def compute_randomized_verification_lb(inp: LowerBoundInput) -> LowerBoundResult:
+    """Return the randomized theorem's arithmetic bound shape.
+
+    This does not model public coins or error probability; it only mirrors the
+    p/B/n domain and exponent form used by the paper's randomized verification
+    theorem.
+    """
+    return compute_deterministic_lb(inp)
+
+
+def build_mst_approximation_reduction_input(graph_input: GraphInput, alpha: float) -> GraphInput:
+    if alpha < 1:
+        raise ValueError("alpha must be at least 1")
+    canonical = graph_input.canonicalized()
+    h_edges = {canonical_edge(*edge) for edge in canonical.subgraph_edges}
+    high_weight = float(len(canonical.nodes)) * float(alpha)
+    return replace(
+        canonical,
+        edge_weights={
+            edge: 1.0 if canonical_edge(*edge) in h_edges else high_weight
+            for edge in canonical.edges
+        },
+    )
+
+
 def _deterministic_h_minus_edge(graph_input: GraphInput) -> GraphInput:
     removed = first_edge_by_repr(graph_input.subgraph_edges)
     if removed is None:
         return graph_input
     return replace(
         graph_input,
-        subgraph_edges={edge for edge in graph_input.subgraph_edges if canonical_edge(*edge) != removed},
+        subgraph_edges={
+            edge for edge in graph_input.subgraph_edges if canonical_edge(*edge) != removed
+        },
+    )
+
+
+def _complement_h(graph_input: GraphInput) -> GraphInput:
+    h_edges = {canonical_edge(*edge) for edge in graph_input.subgraph_edges}
+    return replace(
+        graph_input,
+        subgraph_edges={
+            canonical_edge(*edge)
+            for edge in graph_input.edges
+            if canonical_edge(*edge) not in h_edges
+        },
     )
 
 
@@ -96,7 +135,9 @@ def check_reduction_equivalence(
                 passed=False,
                 counterexample_case=witness.case_name,
             )
-    return ReductionCheckResult(reduction_name=reduction_name, passed=True, counterexample_case=None)
+    return ReductionCheckResult(
+        reduction_name=reduction_name, passed=True, counterexample_case=None
+    )
 
 
 def _hamiltonian_witnesses() -> list[ReductionWitness]:
@@ -128,15 +169,92 @@ def _hamiltonian_witnesses() -> list[ReductionWitness]:
     ]
 
 
+def _cut_complement_witnesses() -> list[ReductionWitness]:
+    return [
+        ReductionWitness(
+            case_name="path_spanning_connected",
+            graph_input=GraphInput(
+                nodes={1, 2, 3, 4},
+                edges={(1, 2), (2, 3), (3, 4), (1, 4)},
+                subgraph_edges={(1, 2), (2, 3), (3, 4)},
+            ),
+        ),
+        ReductionWitness(
+            case_name="empty_not_spanning_connected",
+            graph_input=GraphInput(
+                nodes={1, 2, 3},
+                edges={(1, 2), (2, 3)},
+                subgraph_edges=set(),
+            ),
+        ),
+        ReductionWitness(
+            case_name="two_components_not_spanning_connected",
+            graph_input=GraphInput(
+                nodes={1, 2, 3, 4},
+                edges={(1, 2), (2, 3), (3, 4), (1, 4)},
+                subgraph_edges={(1, 2), (3, 4)},
+            ),
+        ),
+    ]
+
+
+def _st_witnesses() -> list[ReductionWitness]:
+    return [
+        ReductionWitness(
+            case_name="st_connected",
+            graph_input=GraphInput(
+                nodes={1, 2, 3, 4},
+                edges={(1, 2), (2, 3), (3, 4), (1, 4)},
+                subgraph_edges={(1, 2), (2, 3)},
+            ),
+        ),
+        ReductionWitness(
+            case_name="st_disconnected",
+            graph_input=GraphInput(
+                nodes={1, 2, 3, 4},
+                edges={(1, 2), (2, 3), (3, 4), (1, 4)},
+                subgraph_edges={(1, 2), (3, 4)},
+            ),
+        ),
+    ]
+
+
+def _e_cycle_witnesses() -> list[ReductionWitness]:
+    return [
+        ReductionWitness(
+            case_name="edge_on_cycle",
+            graph_input=GraphInput(
+                nodes={1, 2, 3},
+                edges={(1, 2), (2, 3), (1, 3)},
+                subgraph_edges={(1, 2), (2, 3), (1, 3)},
+            ),
+        ),
+        ReductionWitness(
+            case_name="bridge_edge",
+            graph_input=GraphInput(
+                nodes={1, 2, 3},
+                edges={(1, 2), (2, 3), (1, 3)},
+                subgraph_edges={(1, 2), (2, 3)},
+            ),
+        ),
+    ]
+
+
 def _reduction_hamiltonian_via(predicate: PredicateName) -> ReductionCheckResult:
     verifier = Verifier()
     target_task = VerificationTask(predicate)
     return check_reduction_equivalence(
         reduction_name=f"hamiltonian_cycle_via_{predicate}",
         witnesses=_hamiltonian_witnesses(),
-        lhs_verdict=lambda witness: verifier.verify(witness.graph_input, VerificationTask("hamiltonian_cycle")).verdict,
-        rhs_verdict=lambda witness: _all_degree_two(witness.graph_input)
-        and verifier.verify(_deterministic_h_minus_edge(witness.graph_input), target_task).verdict,
+        lhs_verdict=lambda witness: (
+            verifier.verify(witness.graph_input, VerificationTask("hamiltonian_cycle")).verdict
+        ),
+        rhs_verdict=lambda witness: (
+            _all_degree_two(witness.graph_input)
+            and verifier.verify(
+                _deterministic_h_minus_edge(witness.graph_input), target_task
+            ).verdict
+        ),
     )
 
 
@@ -148,8 +266,80 @@ def _reduction_hamiltonian_to_simple_path() -> ReductionCheckResult:
     return _reduction_hamiltonian_via("simple_path")
 
 
-def run_reduction_reproduction_suite() -> list[ReductionCheckResult]:
-    return [
+def _reduction_spanning_connected_to_cut_complement() -> ReductionCheckResult:
+    verifier = Verifier()
+    return check_reduction_equivalence(
+        reduction_name="spanning_connected_subgraph_via_not_cut_complement",
+        witnesses=_cut_complement_witnesses(),
+        lhs_verdict=lambda witness: (
+            verifier.verify(
+                witness.graph_input,
+                VerificationTask("spanning_connected_subgraph"),
+            ).verdict
+        ),
+        rhs_verdict=lambda witness: (
+            not verifier.verify(
+                _complement_h(witness.graph_input),
+                VerificationTask("cut"),
+            ).verdict
+        ),
+    )
+
+
+def _reduction_st_connectivity_to_not_st_cut_complement() -> ReductionCheckResult:
+    verifier = Verifier()
+    return check_reduction_equivalence(
+        reduction_name="st_connectivity_via_not_st_cut_complement",
+        witnesses=_st_witnesses(),
+        lhs_verdict=lambda witness: (
+            verifier.verify(
+                witness.graph_input,
+                VerificationTask("st_connectivity", s=1, t=3),
+            ).verdict
+        ),
+        rhs_verdict=lambda witness: (
+            not verifier.verify(
+                _complement_h(witness.graph_input),
+                VerificationTask("st_cut", s=1, t=3),
+            ).verdict
+        ),
+    )
+
+
+def _reduction_e_cycle_to_not_edge_on_all_paths() -> ReductionCheckResult:
+    verifier = Verifier()
+    edge = (1, 2)
+    return check_reduction_equivalence(
+        reduction_name="e_cycle_containment_via_not_edge_on_all_paths",
+        witnesses=_e_cycle_witnesses(),
+        lhs_verdict=lambda witness: (
+            verifier.verify(
+                witness.graph_input,
+                VerificationTask("e_cycle_containment", e=edge),
+            ).verdict
+        ),
+        rhs_verdict=lambda witness: (
+            not verifier.verify(
+                witness.graph_input,
+                VerificationTask("edge_on_all_paths", u=1, v=2, e=edge),
+            ).verdict
+        ),
+    )
+
+
+def run_reduction_reproduction_suite(
+    include_reference_expansions: bool = False,
+) -> list[ReductionCheckResult]:
+    results = [
         _reduction_hamiltonian_to_spanning_tree(),
         _reduction_hamiltonian_to_simple_path(),
     ]
+    if include_reference_expansions:
+        results.extend(
+            [
+                _reduction_spanning_connected_to_cut_complement(),
+                _reduction_st_connectivity_to_not_st_cut_complement(),
+                _reduction_e_cycle_to_not_edge_on_all_paths(),
+            ]
+        )
+    return results

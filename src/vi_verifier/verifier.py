@@ -13,7 +13,6 @@ from .graph_ops import (
     count_zero_weight_edges,
     edge_count,
     first_edge_by_repr,
-    graph_edge_set,
     graph_minus_edges,
     incident_vertex_count,
     mst_of_transformed_graph,
@@ -106,10 +105,14 @@ class Verifier:
             "n": g_graph.number_of_nodes(),
         }
 
-    def _is_spanning_tree_graph(self, g_graph: nx.Graph, h_graph: nx.Graph) -> tuple[bool, dict[str, int]]:
+    def _is_spanning_tree_graph(
+        self, g_graph: nx.Graph, h_graph: nx.Graph
+    ) -> tuple[bool, dict[str, int]]:
         summary = self._mst_summary(g_graph, h_graph)
         h_connected = nx.is_connected(h_graph) if h_graph.number_of_nodes() > 0 else False
-        is_tree = summary["mst_weight"] == 0 and summary["h_edges"] == summary["n"] - 1 and h_connected
+        is_tree = (
+            summary["mst_weight"] == 0 and summary["h_edges"] == summary["n"] - 1 and h_connected
+        )
         summary["h_connected"] = h_connected
         return is_tree, summary
 
@@ -160,10 +163,13 @@ class Verifier:
         )
 
     def _graph_minus_h(self, g_graph: nx.Graph, h_graph: nx.Graph) -> nx.Graph:
-        return graph_minus_edges(g_graph, graph_edge_set(h_graph))
+        # Structural reachability graph; callers only inspect connectivity/path existence.
+        minus = g_graph.copy()
+        minus.remove_edges_from(h_graph.edges())
+        return minus
 
     def _remove_h_edge(self, h_graph: nx.Graph, edge: Edge) -> nx.Graph:
-        if edge not in graph_edge_set(h_graph):
+        if not h_graph.has_edge(*edge):
             raise ValueError("e must be an edge in H")
         return graph_minus_edges(h_graph, {edge})
 

@@ -67,7 +67,9 @@ def _paper_matrix(out_format: str) -> int:
     return 0
 
 
-def _reproduce_lower_bounds(out_format: str, p: int | None, bandwidth: int | None, n: int | None) -> int:
+def _reproduce_lower_bounds(
+    out_format: str, p: int | None, bandwidth: int | None, n: int | None
+) -> int:
     sample_inputs = (
         [LowerBoundInput(p=p, B=bandwidth, n=n)]
         if p is not None and bandwidth is not None and n is not None
@@ -138,7 +140,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("run-suite")
     sub.add_parser("list-cases")
     paper_matrix = sub.add_parser("paper-matrix")
-    paper_matrix.add_argument("--format", choices=["text", "json"], default="text", dest="out_format")
+    paper_matrix.add_argument(
+        "--format", choices=["text", "json"], default="text", dest="out_format"
+    )
     reproduce = sub.add_parser("reproduce-lower-bounds")
     reproduce.add_argument("--format", choices=["text", "json"], default="text", dest="out_format")
     reproduce.add_argument("--p", type=int, default=None)

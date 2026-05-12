@@ -76,11 +76,25 @@ def test_spanning_tree_rejects_disconnected_n_minus_one_edges() -> None:
 def test_spanning_connected_subgraph_true_and_false() -> None:
     verifier = Verifier()
     true_case = _graph_input({(1, 2), (2, 3), (3, 4), (4, 1)})
-    false_case = GraphInput(nodes={1, 2, 3, 4}, edges={(1, 2), (2, 3), (3, 4)}, subgraph_edges={(1, 2)})
-    assert verifier.verify(true_case, VerificationTask("spanning_connected_subgraph")).verdict is True
-    assert verifier.verify(false_case, VerificationTask("spanning_connected_subgraph")).verdict is False
+    false_case = GraphInput(
+        nodes={1, 2, 3, 4}, edges={(1, 2), (2, 3), (3, 4)}, subgraph_edges={(1, 2)}
+    )
+    assert (
+        verifier.verify(true_case, VerificationTask("spanning_connected_subgraph")).verdict is True
+    )
+    assert (
+        verifier.verify(false_case, VerificationTask("spanning_connected_subgraph")).verdict
+        is False
+    )
     assert nx.is_connected(_h_graph(true_case)) is True
     assert nx.is_connected(_h_graph(false_case)) is False
+
+
+def test_spanning_connected_subgraph_rejects_empty_h_with_isolated_nodes() -> None:
+    graph_input = GraphInput(nodes={1, 2, 3}, edges={(1, 2), (2, 3)}, subgraph_edges=set())
+    result = Verifier().verify(graph_input, VerificationTask("spanning_connected_subgraph"))
+    assert result.verdict is False
+    assert result.details["all_nodes_incident"] is False
 
 
 def test_cycle_containment_matches_direct_cycle_check() -> None:
@@ -102,6 +116,14 @@ def test_connectivity_matches_direct_check() -> None:
         result = verifier.verify(case, VerificationTask("connectivity")).verdict
         direct = nx.is_connected(_h_graph(case))
         assert result == direct
+
+
+def test_connectivity_empty_h_matches_incident_node_definition() -> None:
+    graph_input = GraphInput(nodes={1, 2, 3}, edges={(1, 2), (2, 3)}, subgraph_edges=set())
+    result = Verifier().verify(graph_input, VerificationTask("connectivity"))
+    assert result.verdict is True
+    assert result.details["h_incident_vertices"] == 0
+    assert result.details["expected_zero_weight_edges_in_mst"] == 0
 
 
 def test_cut_and_st_cut() -> None:
@@ -141,8 +163,18 @@ def test_e_cycle_containment() -> None:
     verifier = Verifier()
     cycle_case = _triangle_graph_input({(1, 2), (2, 3), (3, 1)})
     no_cycle_case = _triangle_graph_input({(1, 2), (2, 3)})
-    assert verifier.verify(cycle_case, VerificationTask("e_cycle_containment", e=(1, 2))).verdict is True
-    assert verifier.verify(no_cycle_case, VerificationTask("e_cycle_containment", e=(1, 2))).verdict is False
+    assert (
+        verifier.verify(cycle_case, VerificationTask("e_cycle_containment", e=(1, 2))).verdict
+        is True
+    )
+    assert (
+        verifier.verify(cycle_case, VerificationTask("e_cycle_containment", e=(2, 1))).verdict
+        is True
+    )
+    assert (
+        verifier.verify(no_cycle_case, VerificationTask("e_cycle_containment", e=(1, 2))).verdict
+        is False
+    )
 
 
 def test_bipartiteness() -> None:
@@ -161,7 +193,9 @@ def test_simple_path_true_and_false() -> None:
 
     assert verifier.verify(true_case, VerificationTask("simple_path")).verdict is True
     assert verifier.verify(false_cycle_case, VerificationTask("simple_path")).verdict is False
-    assert verifier.verify(false_disconnected_case, VerificationTask("simple_path")).verdict is False
+    assert (
+        verifier.verify(false_disconnected_case, VerificationTask("simple_path")).verdict is False
+    )
 
 
 def test_hamiltonian_cycle_true_and_false() -> None:
@@ -172,8 +206,13 @@ def test_hamiltonian_cycle_true_and_false() -> None:
         {(1, 2), (2, 3), (3, 1), (4, 5), (5, 6), (6, 4)}
     )
     assert verifier.verify(true_case, VerificationTask("hamiltonian_cycle")).verdict is True
-    assert verifier.verify(false_degree_case, VerificationTask("hamiltonian_cycle")).verdict is False
-    assert verifier.verify(false_disconnected_case, VerificationTask("hamiltonian_cycle")).verdict is False
+    assert (
+        verifier.verify(false_degree_case, VerificationTask("hamiltonian_cycle")).verdict is False
+    )
+    assert (
+        verifier.verify(false_disconnected_case, VerificationTask("hamiltonian_cycle")).verdict
+        is False
+    )
 
 
 def test_hamiltonian_cycle_has_paper_metadata() -> None:
@@ -190,9 +229,17 @@ def test_least_element_list_true_and_false() -> None:
     verifier = Verifier()
     graph_input = _le_list_graph_input()
     true_task = VerificationTask("least_element_list", target=1, le_list=[(1, 0.0), (2, 1.0)])
-    false_task = VerificationTask("least_element_list", target=1, le_list=[(1, 0.0), (2, 1.0), (3, 2.0)])
+    false_task = VerificationTask(
+        "least_element_list", target=1, le_list=[(1, 0.0), (2, 1.0), (3, 2.0)]
+    )
     assert verifier.verify(graph_input, true_task).verdict is True
     assert verifier.verify(graph_input, false_task).verdict is False
+
+
+def test_least_element_list_accepts_duplicate_same_distance_entry() -> None:
+    graph_input = _le_list_graph_input()
+    task = VerificationTask("least_element_list", target=1, le_list=[(1, 0.0), (1, 0.0), (2, 1.0)])
+    assert Verifier().verify(graph_input, task).verdict is True
 
 
 def test_least_element_list_validation_errors() -> None:
@@ -207,7 +254,9 @@ def test_least_element_list_validation_errors() -> None:
         ranks={1: 1, 2: 1},
     )
     with pytest.raises(ValueError):
-        verifier.verify(bad_ranks, VerificationTask("least_element_list", target=1, le_list=[(1, 0.0)]))
+        verifier.verify(
+            bad_ranks, VerificationTask("least_element_list", target=1, le_list=[(1, 0.0)])
+        )
 
 
 @pytest.mark.parametrize(
@@ -265,10 +314,14 @@ def test_least_element_list_validation_error_messages(
 
 
 def test_least_element_list_details_key_parity() -> None:
-    details = Verifier().verify(
-        _le_list_graph_input(),
-        VerificationTask("least_element_list", target=1, le_list=[(1, 0.0), (2, 1.0)]),
-    ).details
+    details = (
+        Verifier()
+        .verify(
+            _le_list_graph_input(),
+            VerificationTask("least_element_list", target=1, le_list=[(1, 0.0), (2, 1.0)]),
+        )
+        .details
+    )
     assert set(details) == {
         "target",
         "provided_count",
@@ -286,18 +339,33 @@ def test_all_predicates_include_paper_metadata() -> None:
     verifier = Verifier()
     checks = [
         (_graph_input({(1, 2), (2, 3), (3, 4)}), VerificationTask("spanning_tree")),
-        (_graph_input({(1, 2), (2, 3), (3, 4), (4, 1)}), VerificationTask("spanning_connected_subgraph")),
+        (
+            _graph_input({(1, 2), (2, 3), (3, 4), (4, 1)}),
+            VerificationTask("spanning_connected_subgraph"),
+        ),
         (_triangle_graph_input({(1, 2), (2, 3), (3, 1)}), VerificationTask("cycle_containment")),
         (_graph_input({(1, 2), (2, 3), (3, 4)}), VerificationTask("connectivity")),
         (_graph_input({(1, 2), (1, 4)}), VerificationTask("cut")),
         (_graph_input({(1, 2), (2, 3)}), VerificationTask("st_connectivity", s=1, t=3)),
         (_graph_input({(1, 2), (1, 4)}), VerificationTask("st_cut", s=1, t=3)),
-        (_graph_input({(1, 2), (2, 3), (3, 4)}), VerificationTask("edge_on_all_paths", u=1, v=4, e=(2, 3))),
-        (_triangle_graph_input({(1, 2), (2, 3), (3, 1)}), VerificationTask("e_cycle_containment", e=(1, 2))),
+        (
+            _graph_input({(1, 2), (2, 3), (3, 4)}),
+            VerificationTask("edge_on_all_paths", u=1, v=4, e=(2, 3)),
+        ),
+        (
+            _triangle_graph_input({(1, 2), (2, 3), (3, 1)}),
+            VerificationTask("e_cycle_containment", e=(1, 2)),
+        ),
         (_graph_input({(1, 2), (2, 3), (3, 4)}), VerificationTask("bipartiteness")),
         (_graph_input({(1, 2), (2, 3), (3, 4)}), VerificationTask("simple_path")),
-        (_cycle_graph_input({(1, 2), (2, 3), (3, 4), (4, 1)}), VerificationTask("hamiltonian_cycle")),
-        (_le_list_graph_input(), VerificationTask("least_element_list", target=1, le_list=[(1, 0.0), (2, 1.0)])),
+        (
+            _cycle_graph_input({(1, 2), (2, 3), (3, 4), (4, 1)}),
+            VerificationTask("hamiltonian_cycle"),
+        ),
+        (
+            _le_list_graph_input(),
+            VerificationTask("least_element_list", target=1, le_list=[(1, 0.0), (2, 1.0)]),
+        ),
     ]
     for graph_input, task in checks:
         details = verifier.verify(graph_input, task).details
@@ -310,18 +378,33 @@ def test_predicate_metadata_matches_paper_registry() -> None:
     verifier = Verifier()
     checks = [
         (_graph_input({(1, 2), (2, 3), (3, 4)}), VerificationTask("spanning_tree")),
-        (_graph_input({(1, 2), (2, 3), (3, 4), (4, 1)}), VerificationTask("spanning_connected_subgraph")),
+        (
+            _graph_input({(1, 2), (2, 3), (3, 4), (4, 1)}),
+            VerificationTask("spanning_connected_subgraph"),
+        ),
         (_triangle_graph_input({(1, 2), (2, 3), (3, 1)}), VerificationTask("cycle_containment")),
         (_graph_input({(1, 2), (2, 3), (3, 4)}), VerificationTask("connectivity")),
         (_graph_input({(1, 2), (1, 4)}), VerificationTask("cut")),
         (_graph_input({(1, 2), (2, 3)}), VerificationTask("st_connectivity", s=1, t=3)),
         (_graph_input({(1, 2), (1, 4)}), VerificationTask("st_cut", s=1, t=3)),
-        (_graph_input({(1, 2), (2, 3), (3, 4)}), VerificationTask("edge_on_all_paths", u=1, v=4, e=(2, 3))),
-        (_triangle_graph_input({(1, 2), (2, 3), (3, 1)}), VerificationTask("e_cycle_containment", e=(1, 2))),
+        (
+            _graph_input({(1, 2), (2, 3), (3, 4)}),
+            VerificationTask("edge_on_all_paths", u=1, v=4, e=(2, 3)),
+        ),
+        (
+            _triangle_graph_input({(1, 2), (2, 3), (3, 1)}),
+            VerificationTask("e_cycle_containment", e=(1, 2)),
+        ),
         (_graph_input({(1, 2), (2, 3), (3, 4)}), VerificationTask("bipartiteness")),
         (_graph_input({(1, 2), (2, 3), (3, 4)}), VerificationTask("simple_path")),
-        (_cycle_graph_input({(1, 2), (2, 3), (3, 4), (4, 1)}), VerificationTask("hamiltonian_cycle")),
-        (_le_list_graph_input(), VerificationTask("least_element_list", target=1, le_list=[(1, 0.0), (2, 1.0)])),
+        (
+            _cycle_graph_input({(1, 2), (2, 3), (3, 4), (4, 1)}),
+            VerificationTask("hamiltonian_cycle"),
+        ),
+        (
+            _le_list_graph_input(),
+            VerificationTask("least_element_list", target=1, le_list=[(1, 0.0), (2, 1.0)]),
+        ),
     ]
     for graph_input, task in checks:
         details = verifier.verify(graph_input, task).details
@@ -356,7 +439,9 @@ def test_input_validation_errors() -> None:
         verifier.verify(good, VerificationTask("st_connectivity", s=1))
     with pytest.raises(ValueError):
         verifier.verify(good, VerificationTask("e_cycle_containment", e=(1, 3)))
-    bad_weights = GraphInput(nodes={1, 2}, edges={(1, 2)}, subgraph_edges=set(), edge_weights={(1, 3): 5.0})
+    bad_weights = GraphInput(
+        nodes={1, 2}, edges={(1, 2)}, subgraph_edges=set(), edge_weights={(1, 3): 5.0}
+    )
     with pytest.raises(ValueError):
         verifier.verify(bad_weights, VerificationTask("connectivity"))
     with pytest.raises(ValueError):
@@ -415,7 +500,9 @@ def test_non_deferred_rows_are_dispatchable_and_covered() -> None:
         "st_cut": VerificationTask("st_cut", s=1, t=3),
         "edge_on_all_paths": VerificationTask("edge_on_all_paths", u=1, v=4, e=(2, 3)),
         "e_cycle_containment": VerificationTask("e_cycle_containment", e=(1, 2)),
-        "least_element_list": VerificationTask("least_element_list", target=1, le_list=[(1, 0.0), (2, 1.0)]),
+        "least_element_list": VerificationTask(
+            "least_element_list", target=1, le_list=[(1, 0.0), (2, 1.0)]
+        ),
     }
     eval_case_predicates = {case.task.predicate for case in get_eval_cases()}
     for row in rows:

@@ -166,7 +166,9 @@ def get_eval_cases() -> list[EvalCase]:
         EvalCase(
             name="least_element_list_true",
             graph_input=le_graph,
-            task=VerificationTask(predicate="least_element_list", target=1, le_list=[(1, 0.0), (2, 1.0)]),
+            task=VerificationTask(
+                predicate="least_element_list", target=1, le_list=[(1, 0.0), (2, 1.0)]
+            ),
             expected=True,
         ),
         EvalCase(

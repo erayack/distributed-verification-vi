@@ -64,6 +64,10 @@ Implemented predicates:
 - `H` is represented as edge membership over base graph `G`.
 - NetworkX MST/connectivity routines are used as primitive operations.
 
+The proof-reproduction helpers cover theorem arithmetic, small reduction
+witnesses, and paper-style weight transformations. They do not construct the
+full lower-bound graph families or simulate distributed executions.
+
 ### Deferred
 
 - Communication-complexity simulations
