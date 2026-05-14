@@ -1,21 +1,31 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from typing import cast
-
-import networkx as nx
 
 from .graph_ops import (
+    Graph,
     attach_edge_weights,
     build_graph,
     build_subgraph,
     build_weighted_transform_for_mst,
     count_zero_weight_edges,
+    degree_map,
     edge_count,
+    edges,
     first_edge_by_repr,
+    graph_edge_set,
     graph_minus_edges,
+    has_edge,
+    has_path,
     incident_vertex_count,
+    induced_subgraph,
+    is_bipartite,
+    is_connected_nonempty,
+    is_tree_nonempty,
     mst_of_transformed_graph,
+    node_count,
+    nodes,
+    single_source_dijkstra_path_lengths,
     total_mst_weight,
 )
 from .paper_compat import get_paper_compat_row
@@ -60,8 +70,8 @@ class Verifier:
 
     def _verify_canonical(
         self,
-        g_graph: nx.Graph,
-        h_graph: nx.Graph,
+        g_graph: Graph,
+        h_graph: Graph,
         task: VerificationTask,
         graph_input: GraphInput,
     ) -> tuple[bool, dict[str, object]]:
@@ -94,7 +104,7 @@ class Verifier:
         valid = ", ".join(VALID_PREDICATES)
         raise ValueError(f"unsupported predicate '{task.predicate}'. valid predicates: {valid}")
 
-    def _mst_summary(self, g_graph: nx.Graph, h_graph: nx.Graph) -> dict[str, int]:
+    def _mst_summary(self, g_graph: Graph, h_graph: Graph) -> dict[str, int]:
         g_prime = build_weighted_transform_for_mst(g_graph, h_graph)
         mst = mst_of_transformed_graph(g_prime)
         return {
@@ -102,14 +112,14 @@ class Verifier:
             "zero_weight_edges_in_mst": count_zero_weight_edges(mst),
             "h_edges": edge_count(h_graph),
             "h_incident_vertices": incident_vertex_count(h_graph),
-            "n": g_graph.number_of_nodes(),
+            "n": node_count(g_graph),
         }
 
     def _is_spanning_tree_graph(
-        self, g_graph: nx.Graph, h_graph: nx.Graph
+        self, g_graph: Graph, h_graph: Graph
     ) -> tuple[bool, dict[str, int]]:
         summary = self._mst_summary(g_graph, h_graph)
-        h_connected = nx.is_connected(h_graph) if h_graph.number_of_nodes() > 0 else False
+        h_connected = is_connected_nonempty(h_graph) if node_count(h_graph) > 0 else False
         is_tree = (
             summary["mst_weight"] == 0 and summary["h_edges"] == summary["n"] - 1 and h_connected
         )
@@ -117,7 +127,7 @@ class Verifier:
         return is_tree, summary
 
     def verify_spanning_tree(
-        self, g_graph: nx.Graph, h_graph: nx.Graph, _: VerificationTask
+        self, g_graph: Graph, h_graph: Graph, _: VerificationTask
     ) -> tuple[bool, dict[str, object]]:
         is_tree, summary = self._is_spanning_tree_graph(g_graph, h_graph)
         return is_tree, self._with_paper_meta(
@@ -126,7 +136,7 @@ class Verifier:
         )
 
     def verify_spanning_connected_subgraph(
-        self, g_graph: nx.Graph, h_graph: nx.Graph, _: VerificationTask
+        self, g_graph: Graph, h_graph: Graph, _: VerificationTask
     ) -> tuple[bool, dict[str, object]]:
         summary = self._mst_summary(g_graph, h_graph)
         all_nodes_incident = summary["h_incident_vertices"] == summary["n"]
@@ -138,7 +148,7 @@ class Verifier:
         )
 
     def verify_cycle_containment(
-        self, g_graph: nx.Graph, h_graph: nx.Graph, _: VerificationTask
+        self, g_graph: Graph, h_graph: Graph, _: VerificationTask
     ) -> tuple[bool, dict[str, object]]:
         summary = self._mst_summary(g_graph, h_graph)
         expected = summary["n"] - 1 - summary["h_edges"]
@@ -151,7 +161,7 @@ class Verifier:
         )
 
     def verify_connectivity(
-        self, g_graph: nx.Graph, h_graph: nx.Graph, _: VerificationTask
+        self, g_graph: Graph, h_graph: Graph, _: VerificationTask
     ) -> tuple[bool, dict[str, object]]:
         summary = self._mst_summary(g_graph, h_graph)
         expected_zero_edges = max(summary["h_incident_vertices"] - 1, 0)
@@ -162,24 +172,22 @@ class Verifier:
             predicate="connectivity",
         )
 
-    def _graph_minus_h(self, g_graph: nx.Graph, h_graph: nx.Graph) -> nx.Graph:
+    def _graph_minus_h(self, g_graph: Graph, h_graph: Graph) -> Graph:
         # Structural reachability graph; callers only inspect connectivity/path existence.
-        minus = g_graph.copy()
-        minus.remove_edges_from(h_graph.edges())
-        return minus
+        return graph_minus_edges(g_graph, graph_edge_set(h_graph))
 
-    def _remove_h_edge(self, h_graph: nx.Graph, edge: Edge) -> nx.Graph:
-        if not h_graph.has_edge(*edge):
+    def _remove_h_edge(self, h_graph: Graph, edge: Edge) -> Graph:
+        if not has_edge(h_graph, edge):
             raise ValueError("e must be an edge in H")
         return graph_minus_edges(h_graph, {edge})
 
-    def _validate_node(self, graph: nx.Graph, node: NodeId, label: str) -> None:
-        if node not in graph.nodes():
+    def _validate_node(self, graph: Graph, node: NodeId, label: str) -> None:
+        if node not in nodes(graph):
             raise ValueError(f"{label}={node} is not a node in G")
 
     def _validate_le_list_inputs(
         self,
-        graph: nx.Graph,
+        graph: Graph,
         task: VerificationTask,
         graph_input: GraphInput,
     ) -> tuple[NodeId, list[tuple[NodeId, float]], dict[NodeId, int], set[NodeId]]:
@@ -188,25 +196,25 @@ class Verifier:
         if task.le_list is None:
             raise ValueError("least_element_list requires le_list")
 
-        nodes = set(cast("Iterable[NodeId]", graph.nodes()))
-        if task.target not in nodes:
+        graph_nodes = set(nodes(graph))
+        if task.target not in graph_nodes:
             raise ValueError("target must be a node in G")
         if graph_input.ranks is None:
             raise ValueError("least_element_list requires ranks in GraphInput")
-        if set(graph_input.ranks.keys()) != nodes:
+        if set(graph_input.ranks.keys()) != graph_nodes:
             raise ValueError("ranks must be provided for all nodes in G")
         if len(set(graph_input.ranks.values())) != len(graph_input.ranks):
             raise ValueError("ranks must be distinct")
 
-        return task.target, task.le_list, graph_input.ranks, nodes
+        return task.target, task.le_list, graph_input.ranks, graph_nodes
 
     def _expected_le_list(
         self,
-        weighted_graph: nx.Graph,
+        weighted_graph: Graph,
         target: NodeId,
         ranks: Mapping[NodeId, int],
     ) -> dict[NodeId, float]:
-        distances = nx.single_source_dijkstra_path_length(weighted_graph, target, weight="weight")
+        distances = single_source_dijkstra_path_lengths(weighted_graph, target)
         expected: dict[NodeId, float] = {}
         best_rank_so_far: int | None = None
         for node, dist in sorted(distances.items(), key=lambda item: (item[1], repr(item[0]))):
@@ -232,44 +240,44 @@ class Verifier:
         return provided
 
     def verify_cut(
-        self, g_graph: nx.Graph, h_graph: nx.Graph, _: VerificationTask
+        self, g_graph: Graph, h_graph: Graph, _: VerificationTask
     ) -> tuple[bool, dict[str, object]]:
         minus = self._graph_minus_h(g_graph, h_graph)
-        connected = nx.is_connected(minus) if minus.number_of_nodes() > 0 else True
+        connected = is_connected_nonempty(minus) if node_count(minus) > 0 else True
         return (not connected), self._with_paper_meta(
             {"minus_h_connected": connected},
             predicate="cut",
         )
 
     def verify_st_connectivity(
-        self, g_graph: nx.Graph, h_graph: nx.Graph, task: VerificationTask
+        self, g_graph: Graph, h_graph: Graph, task: VerificationTask
     ) -> tuple[bool, dict[str, object]]:
         if task.s is None or task.t is None:
             raise ValueError("st_connectivity requires both s and t")
         self._validate_node(g_graph, task.s, "s")
         self._validate_node(g_graph, task.t, "t")
-        verdict = nx.has_path(h_graph, task.s, task.t)
+        verdict = has_path(h_graph, task.s, task.t)
         return verdict, self._with_paper_meta(
             {"s": task.s, "t": task.t},
             predicate="st_connectivity",
         )
 
     def verify_st_cut(
-        self, g_graph: nx.Graph, h_graph: nx.Graph, task: VerificationTask
+        self, g_graph: Graph, h_graph: Graph, task: VerificationTask
     ) -> tuple[bool, dict[str, object]]:
         if task.s is None or task.t is None:
             raise ValueError("st_cut requires both s and t")
         self._validate_node(g_graph, task.s, "s")
         self._validate_node(g_graph, task.t, "t")
         minus = self._graph_minus_h(g_graph, h_graph)
-        has_path = nx.has_path(minus, task.s, task.t)
-        return (not has_path), self._with_paper_meta(
-            {"s": task.s, "t": task.t, "minus_h_has_path": has_path},
+        path_exists = has_path(minus, task.s, task.t)
+        return (not path_exists), self._with_paper_meta(
+            {"s": task.s, "t": task.t, "minus_h_has_path": path_exists},
             predicate="st_cut",
         )
 
     def verify_edge_on_all_paths(
-        self, g_graph: nx.Graph, h_graph: nx.Graph, task: VerificationTask
+        self, g_graph: Graph, h_graph: Graph, task: VerificationTask
     ) -> tuple[bool, dict[str, object]]:
         if task.u is None or task.v is None or task.e is None:
             raise ValueError("edge_on_all_paths requires u, v, and e")
@@ -277,38 +285,38 @@ class Verifier:
         self._validate_node(g_graph, task.v, "v")
         edge = canonical_edge(*task.e)
         h_minus = self._remove_h_edge(h_graph, edge)
-        has_path = nx.has_path(h_minus, task.u, task.v)
-        return (not has_path), self._with_paper_meta(
+        path_exists = has_path(h_minus, task.u, task.v)
+        return (not path_exists), self._with_paper_meta(
             {"u": task.u, "v": task.v, "removed_edge": edge},
             predicate="edge_on_all_paths",
         )
 
     def verify_e_cycle(
-        self, g_graph: nx.Graph, h_graph: nx.Graph, task: VerificationTask
+        self, g_graph: Graph, h_graph: Graph, task: VerificationTask
     ) -> tuple[bool, dict[str, object]]:
         if task.e is None:
             raise ValueError("e_cycle_containment requires e")
         edge = canonical_edge(*task.e)
         h_minus = self._remove_h_edge(h_graph, edge)
-        in_cycle = nx.has_path(h_minus, edge[0], edge[1])
+        in_cycle = has_path(h_minus, edge[0], edge[1])
         return in_cycle, self._with_paper_meta(
             {"removed_edge": edge},
             predicate="e_cycle_containment",
         )
 
     def verify_bipartiteness(
-        self, _: nx.Graph, h_graph: nx.Graph, __: VerificationTask
+        self, _: Graph, h_graph: Graph, __: VerificationTask
     ) -> tuple[bool, dict[str, object]]:
-        bipartite = nx.is_bipartite(h_graph)
+        bipartite = is_bipartite(h_graph)
         return bipartite, self._with_paper_meta(
             {},
             predicate="bipartiteness",
         )
 
     def verify_simple_path(
-        self, _: nx.Graph, h_graph: nx.Graph, __: VerificationTask
+        self, _: Graph, h_graph: Graph, __: VerificationTask
     ) -> tuple[bool, dict[str, object]]:
-        degrees: dict[NodeId, int] = dict(cast("Iterable[tuple[NodeId, int]]", h_graph.degree()))
+        degrees = degree_map(h_graph)
         incident_nodes = [node for node, degree in degrees.items() if degree > 0]
         deg1 = sum(1 for degree in degrees.values() if degree == 1)
         deg2 = sum(1 for degree in degrees.values() if degree == 2)
@@ -322,13 +330,13 @@ class Verifier:
                     "deg2": deg2,
                     "max_degree": max_degree,
                     "incident_nodes": len(incident_nodes),
-                    "edge_count": h_graph.number_of_edges(),
+                    "edge_count": edge_count(h_graph),
                 },
                 predicate="simple_path",
             )
 
-        incident_subgraph = h_graph.subgraph(incident_nodes).copy()
-        is_tree = nx.is_tree(incident_subgraph)
+        incident_subgraph = induced_subgraph(h_graph, incident_nodes)
+        is_tree = is_tree_nonempty(incident_subgraph)
         verdict = is_tree
         return verdict, self._with_paper_meta(
             {
@@ -336,7 +344,7 @@ class Verifier:
                 "deg2": deg2,
                 "max_degree": max_degree,
                 "incident_nodes": len(incident_nodes),
-                "edge_count": incident_subgraph.number_of_edges(),
+                "edge_count": edge_count(incident_subgraph),
                 "connected_incident": is_tree,
                 "acyclic_incident": is_tree,
             },
@@ -344,12 +352,12 @@ class Verifier:
         )
 
     def verify_hamiltonian_cycle(
-        self, g_graph: nx.Graph, h_graph: nx.Graph, task: VerificationTask
+        self, g_graph: Graph, h_graph: Graph, task: VerificationTask
     ) -> tuple[bool, dict[str, object]]:
-        n = g_graph.number_of_nodes()
-        degrees: dict[NodeId, int] = dict(cast("Iterable[tuple[NodeId, int]]", h_graph.degree()))
-        all_degree_two = all(degrees.get(node, 0) == 2 for node in g_graph.nodes())
-        h_edges = h_graph.number_of_edges()
+        n = node_count(g_graph)
+        degrees = degree_map(h_graph)
+        all_degree_two = all(degrees.get(node, 0) == 2 for node in nodes(g_graph))
+        h_edges = edge_count(h_graph)
 
         if not all_degree_two or h_edges != n or h_edges == 0:
             return False, self._with_paper_meta(
@@ -361,7 +369,7 @@ class Verifier:
                 predicate="hamiltonian_cycle",
             )
 
-        edge = first_edge_by_repr(h_graph.edges())
+        edge = first_edge_by_repr(edges(h_graph))
         if edge is None:
             raise ValueError("hamiltonian_cycle requires at least one edge after preconditions")
         h_minus = graph_minus_edges(h_graph, {edge})
@@ -379,8 +387,8 @@ class Verifier:
 
     def verify_least_element_list(
         self,
-        g_graph: nx.Graph,
-        _: nx.Graph,
+        g_graph: Graph,
+        _: Graph,
         task: VerificationTask,
         graph_input: GraphInput,
     ) -> tuple[bool, dict[str, object]]:

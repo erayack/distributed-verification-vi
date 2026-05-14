@@ -62,7 +62,7 @@ Implemented predicates:
 - Single-process centralized execution (no distributed round simulation).
 - Undirected simple graphs.
 - `H` is represented as edge membership over base graph `G`.
-- NetworkX MST/connectivity routines are used as primitive operations.
+- rustworkx MST/connectivity routines are used as primitive operations.
 
 The proof-reproduction helpers cover theorem arithmetic, small reduction
 witnesses, and paper-style weight transformations. They do not construct the

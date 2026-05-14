@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 
-import networkx as nx
 import pytest
 
 from vi_verifier.cli import main as cli_main
@@ -50,21 +49,12 @@ def _le_list_graph_input() -> GraphInput:
     )
 
 
-def _h_graph(gi: GraphInput) -> nx.Graph:
-    h = nx.Graph()
-    h.add_nodes_from(gi.nodes)
-    h.add_edges_from(gi.subgraph_edges)
-    return h
-
-
 def test_spanning_tree_true_and_false() -> None:
     verifier = Verifier()
     true_case = _graph_input({(1, 2), (2, 3), (3, 4)})
     false_case = _graph_input({(1, 2), (2, 3), (3, 4), (4, 1)})
     assert verifier.verify(true_case, VerificationTask("spanning_tree")).verdict is True
     assert verifier.verify(false_case, VerificationTask("spanning_tree")).verdict is False
-    assert nx.is_tree(_h_graph(true_case)) is True
-    assert nx.is_tree(_h_graph(false_case)) is False
 
 
 def test_spanning_tree_rejects_disconnected_n_minus_one_edges() -> None:
@@ -86,8 +76,6 @@ def test_spanning_connected_subgraph_true_and_false() -> None:
         verifier.verify(false_case, VerificationTask("spanning_connected_subgraph")).verdict
         is False
     )
-    assert nx.is_connected(_h_graph(true_case)) is True
-    assert nx.is_connected(_h_graph(false_case)) is False
 
 
 def test_spanning_connected_subgraph_rejects_empty_h_with_isolated_nodes() -> None:
@@ -102,20 +90,16 @@ def test_cycle_containment_matches_direct_cycle_check() -> None:
     cycle_case = _triangle_graph_input({(1, 2), (2, 3), (3, 1)})
     acyclic_case = _triangle_graph_input({(1, 2), (2, 3)})
 
-    for case in (cycle_case, acyclic_case):
-        result = verifier.verify(case, VerificationTask("cycle_containment")).verdict
-        direct = not nx.is_forest(_h_graph(case))
-        assert result == direct
+    assert verifier.verify(cycle_case, VerificationTask("cycle_containment")).verdict is True
+    assert verifier.verify(acyclic_case, VerificationTask("cycle_containment")).verdict is False
 
 
 def test_connectivity_matches_direct_check() -> None:
     verifier = Verifier()
     connected = _graph_input({(1, 2), (2, 3), (3, 4)})
     disconnected = _graph_input({(1, 2), (3, 4)})
-    for case in (connected, disconnected):
-        result = verifier.verify(case, VerificationTask("connectivity")).verdict
-        direct = nx.is_connected(_h_graph(case))
-        assert result == direct
+    assert verifier.verify(connected, VerificationTask("connectivity")).verdict is True
+    assert verifier.verify(disconnected, VerificationTask("connectivity")).verdict is False
 
 
 def test_connectivity_empty_h_matches_incident_node_definition() -> None:
@@ -138,6 +122,18 @@ def test_st_connectivity() -> None:
     case = _graph_input({(1, 2), (2, 3)})
     assert verifier.verify(case, VerificationTask("st_connectivity", s=1, t=3)).verdict is True
     assert verifier.verify(case, VerificationTask("st_connectivity", s=1, t=4)).verdict is False
+
+
+def test_st_connectivity_same_node_has_trivial_path() -> None:
+    case = GraphInput(nodes={1, 2}, edges={(1, 2)}, subgraph_edges=set())
+    assert Verifier().verify(case, VerificationTask("st_connectivity", s=1, t=1)).verdict is True
+
+
+def test_st_cut_same_node_is_not_cut() -> None:
+    case = GraphInput(nodes={1, 2}, edges={(1, 2)}, subgraph_edges={(1, 2)})
+    result = Verifier().verify(case, VerificationTask("st_cut", s=1, t=1))
+    assert result.verdict is False
+    assert result.details["minus_h_has_path"] is True
 
 
 def test_edge_on_all_paths() -> None:

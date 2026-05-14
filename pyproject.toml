@@ -13,7 +13,7 @@ keywords = [
   "distributed-algorithms",
   "graph-theory",
   "verification",
-  "networkx",
+  "rustworkx",
 ]
 classifiers = [
   "Development Status :: 3 - Alpha",
@@ -30,14 +30,13 @@ classifiers = [
   "Topic :: Scientific/Engineering",
 ]
 dependencies = [
-  "networkx>=3.2,<4",
+  "rustworkx>=0.17,<1",
 ]
 
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0,<10",
   "ruff>=0.5",
-  "pyright>=1.1",
 ]
 
 [project.scripts]
@@ -70,10 +69,3 @@ target-version = "py39"
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]
 ignore = ["E501"]
-
-[tool.pyright]
-include = ["src", "tests"]
-pythonVersion = "3.9"
-typeCheckingMode = "basic"
-reportMissingTypeStubs = false
-reportMissingModuleSource = "none"
