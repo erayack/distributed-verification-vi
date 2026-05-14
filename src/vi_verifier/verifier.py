@@ -5,8 +5,8 @@ from collections.abc import Iterable, Mapping
 from .graph_ops import (
     Graph,
     attach_edge_weights,
-    build_graph,
-    build_subgraph,
+    build_canonical_graph,
+    build_canonical_subgraph,
     build_weighted_transform_for_mst,
     count_zero_weight_edges,
     degree_map,
@@ -17,6 +17,8 @@ from .graph_ops import (
     graph_minus_edges,
     has_edge,
     has_path,
+    incident_component_count,
+    incident_connectivity,
     incident_vertex_count,
     induced_subgraph,
     is_bipartite,
@@ -63,8 +65,8 @@ class Verifier:
 
     def verify(self, graph_input: GraphInput, task: VerificationTask) -> VerificationResult:
         g_input = graph_input.canonicalized()
-        g_graph = build_graph(g_input.nodes, g_input.edges)
-        h_graph = build_subgraph(g_graph, g_input.subgraph_edges)
+        g_graph = build_canonical_graph(g_input.nodes, g_input.edges)
+        h_graph = build_canonical_subgraph(g_graph, g_input.subgraph_edges)
         verdict, details = self._verify_canonical(g_graph, h_graph, task, g_input)
         return VerificationResult(predicate=task.predicate, verdict=verdict, details=details)
 
@@ -118,12 +120,18 @@ class Verifier:
     def _is_spanning_tree_graph(
         self, g_graph: Graph, h_graph: Graph
     ) -> tuple[bool, dict[str, int]]:
-        summary = self._mst_summary(g_graph, h_graph)
-        h_connected = is_connected_nonempty(h_graph) if node_count(h_graph) > 0 else False
-        is_tree = (
-            summary["mst_weight"] == 0 and summary["h_edges"] == summary["n"] - 1 and h_connected
-        )
-        summary["h_connected"] = h_connected
+        n = node_count(g_graph)
+        h_edges = edge_count(h_graph)
+        h_connected = is_connected_nonempty(h_graph) if n > 0 else False
+        is_tree = h_edges == n - 1 and h_connected
+        summary = {
+            "mst_weight": 0 if h_connected else 1,
+            "zero_weight_edges_in_mst": n - 1 if h_connected and n > 0 else 0,
+            "h_edges": h_edges,
+            "h_incident_vertices": incident_vertex_count(h_graph),
+            "n": n,
+            "h_connected": h_connected,
+        }
         return is_tree, summary
 
     def verify_spanning_tree(
@@ -138,10 +146,19 @@ class Verifier:
     def verify_spanning_connected_subgraph(
         self, g_graph: Graph, h_graph: Graph, _: VerificationTask
     ) -> tuple[bool, dict[str, object]]:
-        summary = self._mst_summary(g_graph, h_graph)
-        all_nodes_incident = summary["h_incident_vertices"] == summary["n"]
-        verdict = summary["mst_weight"] == 0 and all_nodes_incident
-        summary["all_nodes_incident"] = all_nodes_incident
+        n = node_count(g_graph)
+        h_incident_vertices = incident_vertex_count(h_graph)
+        all_nodes_incident = h_incident_vertices == n
+        h_connected = is_connected_nonempty(h_graph) if n > 0 else False
+        verdict = h_connected and all_nodes_incident
+        summary = {
+            "mst_weight": 0 if h_connected else 1,
+            "zero_weight_edges_in_mst": n - 1 if h_connected and n > 0 else 0,
+            "h_edges": edge_count(h_graph),
+            "h_incident_vertices": h_incident_vertices,
+            "n": n,
+            "all_nodes_incident": all_nodes_incident,
+        }
         return verdict, self._with_paper_meta(
             summary,
             predicate="spanning_connected_subgraph",
@@ -150,11 +167,19 @@ class Verifier:
     def verify_cycle_containment(
         self, g_graph: Graph, h_graph: Graph, _: VerificationTask
     ) -> tuple[bool, dict[str, object]]:
-        summary = self._mst_summary(g_graph, h_graph)
-        expected = summary["n"] - 1 - summary["h_edges"]
-        cycle_free = summary["mst_weight"] == expected
-        summary["cycle_free_weight_expected"] = expected
-        summary["cycle_free"] = cycle_free
+        h_incident_vertices, incident_components = incident_component_count(h_graph)
+        h_edges = edge_count(h_graph)
+        cycle_free = h_edges == h_incident_vertices - incident_components
+        expected = node_count(g_graph) - 1 - h_edges
+        summary = {
+            "mst_weight": expected if cycle_free else expected + 1,
+            "zero_weight_edges_in_mst": h_edges if cycle_free else h_incident_vertices - incident_components,
+            "h_edges": h_edges,
+            "h_incident_vertices": h_incident_vertices,
+            "n": node_count(g_graph),
+            "cycle_free_weight_expected": expected,
+            "cycle_free": cycle_free,
+        }
         return (not cycle_free), self._with_paper_meta(
             summary,
             predicate="cycle_containment",
@@ -163,10 +188,16 @@ class Verifier:
     def verify_connectivity(
         self, g_graph: Graph, h_graph: Graph, _: VerificationTask
     ) -> tuple[bool, dict[str, object]]:
-        summary = self._mst_summary(g_graph, h_graph)
-        expected_zero_edges = max(summary["h_incident_vertices"] - 1, 0)
-        connected = summary["zero_weight_edges_in_mst"] == expected_zero_edges
-        summary["expected_zero_weight_edges_in_mst"] = expected_zero_edges
+        connected, h_incident_vertices = incident_connectivity(h_graph)
+        expected_zero_edges = max(h_incident_vertices - 1, 0)
+        summary = {
+            "mst_weight": 0 if connected else 1,
+            "zero_weight_edges_in_mst": expected_zero_edges if connected else 0,
+            "h_edges": edge_count(h_graph),
+            "h_incident_vertices": h_incident_vertices,
+            "n": node_count(g_graph),
+            "expected_zero_weight_edges_in_mst": expected_zero_edges,
+        }
         return connected, self._with_paper_meta(
             summary,
             predicate="connectivity",

@@ -27,8 +27,9 @@ PaperFidelity = Literal["implemented", "approximated", "deferred"]
 
 def canonical_edge(u: NodeId, v: NodeId) -> Edge:
     """Return a stable undirected edge tuple."""
-    left, right = sorted((repr(u), repr(v)))
-    if left == repr(u):
+    u_repr = repr(u)
+    v_repr = repr(v)
+    if u_repr <= v_repr:
         return (u, v)
     return (v, u)
 
@@ -46,8 +47,8 @@ class GraphInput:
     ranks: dict[NodeId, int] | None = None
 
     def canonicalized(self) -> GraphInput:
-        canonical_edges = canonicalize_edges(set(self.edges))
-        canonical_subgraph_edges = canonicalize_edges(set(self.subgraph_edges))
+        canonical_edges = canonicalize_edges(self.edges)
+        canonical_subgraph_edges = canonicalize_edges(self.subgraph_edges)
         canonical_weights: dict[Edge, float] | None = None
         if self.edge_weights is not None:
             canonical_weights = {}
@@ -61,7 +62,7 @@ class GraphInput:
                 unknown = sorted(unknown_weight_edges, key=repr)
                 raise ValueError(f"edge_weights include edges not in edges: {unknown}")
         return GraphInput(
-            nodes=set(self.nodes),
+            nodes=self.nodes.copy(),
             edges=canonical_edges,
             subgraph_edges=canonical_subgraph_edges,
             edge_weights=canonical_weights,
