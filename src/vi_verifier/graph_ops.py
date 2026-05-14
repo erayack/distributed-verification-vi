@@ -78,7 +78,7 @@ def first_edge_by_repr(edges_iter: Iterable[Edge]) -> Edge | None:
 def graph_minus_edges(base_graph: Graph, removed_edges: set[Edge]) -> Graph:
     removed = removed_edges
     minus = _new_graph_from_node_list(base_graph.node_list)
-    _add_canonical_edges(minus, (edge for edge in edges(base_graph) if edge not in removed))
+    _add_canonical_edges(minus, (edge for edge in base_graph.edge_set if edge not in removed))
     return minus
 
 
