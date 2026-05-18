@@ -180,7 +180,11 @@ class Verifier:
         return connected
 
     def _has_path(self, graph: Graph, source: NodeId, target: NodeId) -> bool:
-        cache_key = (id(graph), source, target) if repr(source) <= repr(target) else (id(graph), target, source)
+        cache_key = (
+            (id(graph), source, target)
+            if repr(source) <= repr(target)
+            else (id(graph), target, source)
+        )
         path_exists = self._has_path_cache.get(cache_key)
         if path_exists is None:
             path_exists = has_path(graph, source, target)
@@ -262,7 +266,9 @@ class Verifier:
         expected = node_count(g_graph) - 1 - h_edges
         summary = {
             "mst_weight": expected if cycle_free else expected + 1,
-            "zero_weight_edges_in_mst": h_edges if cycle_free else h_incident_vertices - incident_components,
+            "zero_weight_edges_in_mst": h_edges
+            if cycle_free
+            else h_incident_vertices - incident_components,
             "h_edges": h_edges,
             "h_incident_vertices": h_incident_vertices,
             "n": node_count(g_graph),
@@ -310,7 +316,7 @@ class Verifier:
         return self._minus_graph(h_graph, frozenset((edge,)))
 
     def _validate_node(self, graph: Graph, node: NodeId, label: str) -> None:
-        if node not in nodes(graph):
+        if node not in self._node_set(graph):
             raise ValueError(f"{label}={node} is not a node in G")
 
     def _validate_le_list_inputs(
@@ -485,7 +491,7 @@ class Verifier:
     ) -> tuple[bool, dict[str, object]]:
         n = node_count(g_graph)
         degrees = self._degree_map(h_graph)
-        all_degree_two = all(degrees.get(node, 0) == 2 for node in nodes(g_graph))
+        all_degree_two = all(degree == 2 for degree in degrees.values())
         h_edges = edge_count(h_graph)
 
         if not all_degree_two or h_edges != n or h_edges == 0:
@@ -498,10 +504,7 @@ class Verifier:
                 predicate="hamiltonian_cycle",
             )
 
-        try:
-            edge = min(h_graph.edge_set, key=lambda edge: (repr(edge[0]), repr(edge[1])))
-        except ValueError:
-            raise ValueError("hamiltonian_cycle requires at least one edge after preconditions") from None
+        edge = min(h_graph.edge_set, key=lambda edge: (repr(edge[0]), repr(edge[1])))
         # With every node degree 2 and |E(H)| = |V|, H is a disjoint union of cycles.
         # It is Hamiltonian exactly when that 2-regular graph is connected; removing
         # any edge from a connected n-cycle would yield the spanning tree required by

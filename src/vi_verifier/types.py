@@ -49,6 +49,18 @@ class GraphInput:
     def canonicalized(self) -> GraphInput:
         canonical_edges = canonicalize_edges(self.edges)
         canonical_subgraph_edges = canonicalize_edges(self.subgraph_edges)
+        unknown_edge_endpoints = {
+            edge
+            for edge in canonical_edges
+            if edge[0] not in self.nodes or edge[1] not in self.nodes
+        }
+        if unknown_edge_endpoints:
+            unknown = sorted(unknown_edge_endpoints, key=repr)
+            raise ValueError(f"edges include endpoints not in nodes: {unknown}")
+        unknown_subgraph_edges = canonical_subgraph_edges - canonical_edges
+        if unknown_subgraph_edges:
+            unknown = sorted(unknown_subgraph_edges, key=repr)
+            raise ValueError(f"subgraph_edges include edges not in edges: {unknown}")
         canonical_weights: dict[Edge, float] | None = None
         if self.edge_weights is not None:
             canonical_weights = {}
@@ -56,7 +68,10 @@ class GraphInput:
                 edge = canonical_edge(u, v)
                 if edge in canonical_weights and canonical_weights[edge] != weight:
                     raise ValueError(f"conflicting weights for edge {edge}")
-                canonical_weights[edge] = float(weight)
+                weight_f = float(weight)
+                if weight_f < 0:
+                    raise ValueError(f"edge {edge} has negative weight")
+                canonical_weights[edge] = weight_f
             unknown_weight_edges = set(canonical_weights.keys()) - canonical_edges
             if unknown_weight_edges:
                 unknown = sorted(unknown_weight_edges, key=repr)

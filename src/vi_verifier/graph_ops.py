@@ -93,9 +93,6 @@ def build_graph(input_nodes: set[NodeId], input_edges: set[Edge]) -> Graph:
 
 def build_canonical_graph(input_nodes: set[NodeId], input_edges: set[Edge]) -> Graph:
     graph = _new_graph(input_nodes)
-    for u, v in input_edges:
-        if u not in input_nodes or v not in input_nodes:
-            raise ValueError(f"edge ({u}, {v}) has endpoint not in node set")
     _add_canonical_edges(graph, input_edges)
     return graph
 
@@ -113,30 +110,32 @@ def build_subgraph(base_graph: Graph, subgraph_edges: set[Edge]) -> Graph:
 
 def build_canonical_subgraph(base_graph: Graph, subgraph_edges: set[Edge]) -> Graph:
     h_graph = _new_graph_from_node_list(base_graph.node_list)
-    base_edge_set = base_graph.edge_set
-    for edge in subgraph_edges:
-        if edge not in base_edge_set:
-            raise ValueError(f"subgraph edge {edge} is not in base graph")
     _add_canonical_edges(h_graph, subgraph_edges)
     return h_graph
 
 
 def build_weighted_transform_for_mst(g_graph: Graph, h_graph: Graph) -> Graph:
     g_prime = _new_graph_from_node_list(g_graph.node_list)
+    graph_edges = g_graph.edge_set
     h_edges = h_graph.edge_set
-    for edge in edges(g_graph):
+    add_edge = _add_canonical_edge
+    for edge in graph_edges:
         weight = 0.0 if edge in h_edges else 1.0
-        _add_canonical_edge(g_prime, edge, weight=weight)
+        add_edge(g_prime, edge, weight=weight)
     return g_prime
 
 
 def attach_edge_weights(g_graph: Graph, edge_weights: dict[Edge, float] | None) -> Graph:
     weighted = _new_graph_from_node_list(g_graph.node_list)
-    for edge in edges(g_graph):
-        weight = 1.0 if edge_weights is None else edge_weights.get(edge, 1.0)
-        if weight < 0:
-            raise ValueError(f"edge {edge} has negative weight")
-        _add_canonical_edge(weighted, edge, weight=float(weight))
+    graph_edges = g_graph.edge_set
+    add_edge = _add_canonical_edge
+    if edge_weights is None:
+        for edge in graph_edges:
+            add_edge(weighted, edge, weight=1.0)
+        return weighted
+    get_weight = edge_weights.get
+    for edge in graph_edges:
+        add_edge(weighted, edge, weight=get_weight(edge, 1.0))
     return weighted
 
 
@@ -194,9 +193,7 @@ def incident_connectivity(graph: Graph) -> tuple[bool, int]:
 
 def incident_component_count(graph: Graph) -> tuple[int, int]:
     degrees = degree_map(graph)
-    incident_indices = {
-        graph.node_to_index[node] for node, degree in degrees.items() if degree > 0
-    }
+    incident_indices = {graph.node_to_index[node] for node, degree in degrees.items() if degree > 0}
     if not incident_indices:
         return 0, 0
     components = rx.connected_components(graph.rx_graph)

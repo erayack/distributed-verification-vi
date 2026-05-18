@@ -426,8 +426,12 @@ def test_paper_matrix_contains_expected_rows() -> None:
 
 def test_input_validation_errors() -> None:
     verifier = Verifier()
+    bad_edge_endpoint = GraphInput(nodes={1, 2}, edges={(1, 3)}, subgraph_edges=set())
+    with pytest.raises(ValueError, match="edges include endpoints not in nodes"):
+        verifier.verify(bad_edge_endpoint, VerificationTask("connectivity"))
+
     bad_subgraph = GraphInput(nodes={1, 2}, edges={(1, 2)}, subgraph_edges={(1, 3)})
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="subgraph_edges include edges not in edges"):
         verifier.verify(bad_subgraph, VerificationTask("connectivity"))
 
     good = GraphInput(nodes={1, 2, 3}, edges={(1, 2), (2, 3)}, subgraph_edges={(1, 2)})
@@ -440,6 +444,11 @@ def test_input_validation_errors() -> None:
     )
     with pytest.raises(ValueError):
         verifier.verify(bad_weights, VerificationTask("connectivity"))
+    negative_weights = GraphInput(
+        nodes={1, 2}, edges={(1, 2)}, subgraph_edges=set(), edge_weights={(1, 2): -1.0}
+    )
+    with pytest.raises(ValueError, match="edge \\(1, 2\\) has negative weight"):
+        verifier.verify(negative_weights, VerificationTask("connectivity"))
     with pytest.raises(ValueError):
         verifier.verify(good, VerificationTask(predicate="not_supported"))  # type: ignore[arg-type]
 
