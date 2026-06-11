@@ -49,6 +49,68 @@ def _le_list_graph_input() -> GraphInput:
     )
 
 
+def test_graph_input_snapshots_and_freezes_collections() -> None:
+    nodes: set[NodeId] = {1, 2, 3}
+    edges: set[Edge] = {(1, 2), (2, 3)}
+    subgraph_edges: set[Edge] = {(1, 2)}
+    edge_weights: dict[Edge, float] = {(1, 2): 1.0}
+    ranks: dict[NodeId, int] = {1: 0}
+
+    graph_input = GraphInput(nodes, edges, subgraph_edges, edge_weights, ranks)
+    nodes.add(4)
+    edges.add((3, 4))
+    subgraph_edges.add((2, 3))
+    edge_weights[(2, 3)] = 2.0
+    ranks[2] = 1
+
+    assert graph_input.nodes == frozenset({1, 2, 3})
+    assert graph_input.edges == frozenset({(1, 2), (2, 3)})
+    assert graph_input.subgraph_edges == frozenset({(1, 2)})
+    assert dict(graph_input.edge_weights or {}) == {(1, 2): 1.0}
+    assert dict(graph_input.ranks or {}) == {1: 0}
+    with pytest.raises(AttributeError):
+        graph_input.nodes.add(5)  # type: ignore[attr-defined]
+    with pytest.raises(TypeError):
+        assert graph_input.edge_weights is not None
+        graph_input.edge_weights[(1, 2)] = 9.0  # type: ignore[index]
+
+
+def test_verifier_cache_uses_graph_input_snapshot_after_caller_mutation() -> None:
+    nodes: set[NodeId] = {1, 2, 3}
+    edges: set[Edge] = {(1, 2), (2, 3)}
+    subgraph_edges: set[Edge] = {(1, 2), (2, 3)}
+    graph_input = GraphInput(nodes, edges, subgraph_edges)
+    task = VerificationTask("connectivity")
+    verifier = Verifier()
+
+    assert verifier.verify(graph_input, task).verdict is True
+    subgraph_edges.clear()
+    assert verifier.verify(graph_input, task).verdict is True
+
+
+def test_cached_result_details_are_isolated_from_caller_mutation() -> None:
+    graph_input = _graph_input({(1, 2), (2, 3), (3, 4)})
+    task = VerificationTask("connectivity")
+    verifier = Verifier()
+
+    result = verifier.verify(graph_input, task)
+    result.details["caller_mutation"] = True
+
+    cached_result = verifier.verify(graph_input, task)
+    assert "caller_mutation" not in cached_result.details
+
+
+def test_verification_task_snapshots_and_freezes_le_list() -> None:
+    le_list = [(1, 0.0), (2, 1.0)]
+    task = VerificationTask("least_element_list", target=1, le_list=le_list)
+    le_list.append((3, 2.0))
+
+    assert task.le_list == ((1, 0.0), (2, 1.0))
+    assert isinstance(task.le_list, tuple)
+    with pytest.raises(AttributeError):
+        task.le_list.append((4, 3.0))  # type: ignore[union-attr]
+
+
 def test_spanning_tree_true_and_false() -> None:
     verifier = Verifier()
     true_case = _graph_input({(1, 2), (2, 3), (3, 4)})

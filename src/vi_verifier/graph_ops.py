@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import SupportsFloat, cast
 
@@ -75,29 +75,30 @@ def first_edge_by_repr(edges_iter: Iterable[Edge]) -> Edge | None:
     return min(canonical_edges, key=lambda edge: (repr(edge[0]), repr(edge[1])), default=None)
 
 
-def graph_minus_edges(base_graph: Graph, removed_edges: set[Edge]) -> Graph:
-    removed = removed_edges
+def graph_minus_edges(base_graph: Graph, removed_edges: Iterable[Edge]) -> Graph:
+    removed = set(removed_edges)
     minus = _new_graph_from_node_list(base_graph.node_list)
     _add_canonical_edges(minus, (edge for edge in base_graph.edge_set if edge not in removed))
     return minus
 
 
-def build_graph(input_nodes: set[NodeId], input_edges: set[Edge]) -> Graph:
-    graph = _new_graph(input_nodes)
+def build_graph(input_nodes: Iterable[NodeId], input_edges: Iterable[Edge]) -> Graph:
+    node_set = set(input_nodes)
+    graph = _new_graph(node_set)
     for u, v in input_edges:
-        if u not in input_nodes or v not in input_nodes:
+        if u not in node_set or v not in node_set:
             raise ValueError(f"edge ({u}, {v}) has endpoint not in node set")
         _add_canonical_edge(graph, canonical_edge(u, v))
     return graph
 
 
-def build_canonical_graph(input_nodes: set[NodeId], input_edges: set[Edge]) -> Graph:
+def build_canonical_graph(input_nodes: Iterable[NodeId], input_edges: Iterable[Edge]) -> Graph:
     graph = _new_graph(input_nodes)
     _add_canonical_edges(graph, input_edges)
     return graph
 
 
-def build_subgraph(base_graph: Graph, subgraph_edges: set[Edge]) -> Graph:
+def build_subgraph(base_graph: Graph, subgraph_edges: Iterable[Edge]) -> Graph:
     h_graph = _new_graph_from_node_list(base_graph.node_list)
     base_edge_set = base_graph.edge_set
     for u, v in subgraph_edges:
@@ -108,7 +109,7 @@ def build_subgraph(base_graph: Graph, subgraph_edges: set[Edge]) -> Graph:
     return h_graph
 
 
-def build_canonical_subgraph(base_graph: Graph, subgraph_edges: set[Edge]) -> Graph:
+def build_canonical_subgraph(base_graph: Graph, subgraph_edges: Iterable[Edge]) -> Graph:
     h_graph = _new_graph_from_node_list(base_graph.node_list)
     _add_canonical_edges(h_graph, subgraph_edges)
     return h_graph
@@ -125,7 +126,7 @@ def build_weighted_transform_for_mst(g_graph: Graph, h_graph: Graph) -> Graph:
     return g_prime
 
 
-def attach_edge_weights(g_graph: Graph, edge_weights: dict[Edge, float] | None) -> Graph:
+def attach_edge_weights(g_graph: Graph, edge_weights: Mapping[Edge, float] | None) -> Graph:
     weighted = _new_graph_from_node_list(g_graph.node_list)
     graph_edges = g_graph.edge_set
     add_edge = _add_canonical_edge

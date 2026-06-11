@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Literal, Union
+from types import MappingProxyType
+from typing import AbstractSet, Literal, Union
 
 NodeId = Union[int, str]
 Edge = tuple[NodeId, NodeId]
@@ -34,17 +36,26 @@ def canonical_edge(u: NodeId, v: NodeId) -> Edge:
     return (v, u)
 
 
-def canonicalize_edges(edges: set[Edge]) -> set[Edge]:
-    return {canonical_edge(u, v) for (u, v) in edges}
+def canonicalize_edges(edges: Iterable[Edge]) -> frozenset[Edge]:
+    return frozenset(canonical_edge(u, v) for (u, v) in edges)
 
 
 @dataclass(frozen=True)
 class GraphInput:
-    nodes: set[NodeId]
-    edges: set[Edge]
-    subgraph_edges: set[Edge]
-    edge_weights: dict[Edge, float] | None = None
-    ranks: dict[NodeId, int] | None = None
+    nodes: AbstractSet[NodeId]
+    edges: AbstractSet[Edge]
+    subgraph_edges: AbstractSet[Edge]
+    edge_weights: Mapping[Edge, float] | None = None
+    ranks: Mapping[NodeId, int] | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "nodes", frozenset(self.nodes))
+        object.__setattr__(self, "edges", frozenset(self.edges))
+        object.__setattr__(self, "subgraph_edges", frozenset(self.subgraph_edges))
+        if self.edge_weights is not None:
+            object.__setattr__(self, "edge_weights", MappingProxyType(dict(self.edge_weights)))
+        if self.ranks is not None:
+            object.__setattr__(self, "ranks", MappingProxyType(dict(self.ranks)))
 
     def canonicalized(self) -> GraphInput:
         canonical_edges = canonicalize_edges(self.edges)
@@ -77,7 +88,7 @@ class GraphInput:
                 unknown = sorted(unknown_weight_edges, key=repr)
                 raise ValueError(f"edge_weights include edges not in edges: {unknown}")
         return GraphInput(
-            nodes=self.nodes.copy(),
+            nodes=self.nodes,
             edges=canonical_edges,
             subgraph_edges=canonical_subgraph_edges,
             edge_weights=canonical_weights,
@@ -94,7 +105,11 @@ class VerificationTask:
     v: NodeId | None = None
     e: Edge | None = None
     target: NodeId | None = None
-    le_list: list[tuple[NodeId, float]] | None = None
+    le_list: Sequence[tuple[NodeId, float]] | None = None
+
+    def __post_init__(self) -> None:
+        if self.le_list is not None:
+            object.__setattr__(self, "le_list", tuple(self.le_list))
 
 
 @dataclass(frozen=True)

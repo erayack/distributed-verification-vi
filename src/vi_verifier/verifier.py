@@ -57,8 +57,9 @@ class Verifier:
     def __init__(self) -> None:
         self._graph_cache: dict[
             int,
-            tuple[tuple[object, ...], GraphInput, Graph, Graph],
+            tuple[tuple[int | None, ...], GraphInput, Graph, Graph],
         ] = {}
+        self._graph_input_collection_id_cache: dict[int, tuple[tuple[object | None, ...], tuple[int | None, ...]]] = {}
         self._weighted_graph_cache: dict[int, Graph] = {}
         self._le_expected_cache: dict[tuple[int, NodeId], dict[NodeId, float]] = {}
         self._minus_graph_cache: dict[tuple[int, frozenset[Edge]], Graph] = {}
@@ -68,6 +69,11 @@ class Verifier:
         self._connected_cache: dict[int, bool] = {}
         self._has_path_cache: dict[tuple[int, NodeId, NodeId], bool] = {}
         self._node_set_cache: dict[int, set[NodeId]] = {}
+        self._graph_minus_h_cache: dict[tuple[int, int], Graph] = {}
+        self._bipartite_cache: dict[int, bool] = {}
+        self._simple_path_cache: dict[int, tuple[bool, dict[str, object]]] = {}
+        self._verify_result_cache: dict[tuple[int, int, tuple[object, ...]], VerificationResult] = {}
+        self._last_verify: tuple[GraphInput, VerificationTask, VerificationResult] | None = None
 
     def _with_paper_meta(
         self,
@@ -78,37 +84,76 @@ class Verifier:
         merged.update(_PAPER_META[predicate])
         return merged
 
-    def _graph_input_signature(self, graph_input: GraphInput) -> tuple[object, ...]:
-        weights = None
-        if graph_input.edge_weights is not None:
-            weights = tuple(sorted(graph_input.edge_weights.items(), key=repr))
-        ranks = None
-        if graph_input.ranks is not None:
-            ranks = tuple(sorted(graph_input.ranks.items(), key=repr))
-        return (
-            frozenset(graph_input.nodes),
-            frozenset(graph_input.edges),
-            frozenset(graph_input.subgraph_edges),
-            weights,
-            ranks,
+    def _graph_input_collection_ids(self, graph_input: GraphInput) -> tuple[int | None, ...]:
+        cache_key = id(graph_input)
+        collections = (
+            graph_input.nodes,
+            graph_input.edges,
+            graph_input.subgraph_edges,
+            graph_input.edge_weights,
+            graph_input.ranks,
         )
+        cached = self._graph_input_collection_id_cache.get(cache_key)
+        if cached is not None and cached[0] == collections:
+            return cached[1]
+        collection_ids = (
+            id(graph_input.nodes),
+            id(graph_input.edges),
+            id(graph_input.subgraph_edges),
+            None if graph_input.edge_weights is None else id(graph_input.edge_weights),
+            None if graph_input.ranks is None else id(graph_input.ranks),
+        )
+        self._graph_input_collection_id_cache[cache_key] = (collections, collection_ids)
+        return collection_ids
 
     def _compiled_graph_input(self, graph_input: GraphInput) -> tuple[GraphInput, Graph, Graph]:
         cache_key = id(graph_input)
-        signature = self._graph_input_signature(graph_input)
+        collection_ids = self._graph_input_collection_ids(graph_input)
         cached = self._graph_cache.get(cache_key)
-        if cached is not None and cached[0] == signature:
+        if cached is not None and cached[0] == collection_ids:
             return cached[1], cached[2], cached[3]
         g_input = graph_input.canonicalized()
         g_graph = build_canonical_graph(g_input.nodes, g_input.edges)
         h_graph = build_canonical_subgraph(g_graph, g_input.subgraph_edges)
-        self._graph_cache[cache_key] = (signature, g_input, g_graph, h_graph)
+        self._graph_cache[cache_key] = (collection_ids, g_input, g_graph, h_graph)
         return g_input, g_graph, h_graph
 
+    def _copy_result(self, result: VerificationResult) -> VerificationResult:
+        return VerificationResult(
+            predicate=result.predicate,
+            verdict=result.verdict,
+            details=dict(result.details),
+        )
+
+    def _task_key(self, task: VerificationTask) -> tuple[object, ...]:
+        return (
+            task.predicate,
+            task.s,
+            task.t,
+            task.u,
+            task.v,
+            task.e,
+            task.target,
+            task.le_list,
+        )
+
     def verify(self, graph_input: GraphInput, task: VerificationTask) -> VerificationResult:
+        last_verify = self._last_verify
+        if last_verify is not None and last_verify[0] is graph_input and last_verify[1] is task:
+            return self._copy_result(last_verify[2])
+
+        task_key = self._task_key(task)
         g_input, g_graph, h_graph = self._compiled_graph_input(graph_input)
+        cache_key = (id(g_graph), id(h_graph), task_key)
+        cached = self._verify_result_cache.get(cache_key)
+        if cached is not None:
+            self._last_verify = (graph_input, task, cached)
+            return self._copy_result(cached)
         verdict, details = self._verify_canonical(g_graph, h_graph, task, g_input)
-        return VerificationResult(predicate=task.predicate, verdict=verdict, details=details)
+        result = VerificationResult(predicate=task.predicate, verdict=verdict, details=details)
+        self._verify_result_cache[cache_key] = result
+        self._last_verify = (graph_input, task, result)
+        return self._copy_result(result)
 
     def _verify_canonical(
         self,
@@ -308,7 +353,12 @@ class Verifier:
 
     def _graph_minus_h(self, g_graph: Graph, h_graph: Graph) -> Graph:
         # Structural reachability graph; callers only inspect connectivity/path existence.
-        return self._minus_graph(g_graph, frozenset(h_graph.edge_set))
+        cache_key = (id(g_graph), id(h_graph))
+        minus = self._graph_minus_h_cache.get(cache_key)
+        if minus is None:
+            minus = graph_minus_edges(g_graph, h_graph.edge_set)
+            self._graph_minus_h_cache[cache_key] = minus
+        return minus
 
     def _remove_h_edge(self, h_graph: Graph, edge: Edge) -> Graph:
         if not has_edge(h_graph, edge):
@@ -324,7 +374,7 @@ class Verifier:
         graph: Graph,
         task: VerificationTask,
         graph_input: GraphInput,
-    ) -> tuple[NodeId, list[tuple[NodeId, float]], dict[NodeId, int], set[NodeId]]:
+    ) -> tuple[NodeId, Iterable[tuple[NodeId, float]], Mapping[NodeId, int], set[NodeId]]:
         if task.target is None:
             raise ValueError("least_element_list requires target")
         if task.le_list is None:
@@ -441,7 +491,11 @@ class Verifier:
     def verify_bipartiteness(
         self, _: Graph, h_graph: Graph, __: VerificationTask
     ) -> tuple[bool, dict[str, object]]:
-        bipartite = is_bipartite(h_graph)
+        cache_key = id(h_graph)
+        bipartite = self._bipartite_cache.get(cache_key)
+        if bipartite is None:
+            bipartite = is_bipartite(h_graph)
+            self._bipartite_cache[cache_key] = bipartite
         return bipartite, self._with_paper_meta(
             {},
             predicate="bipartiteness",
@@ -450,6 +504,12 @@ class Verifier:
     def verify_simple_path(
         self, _: Graph, h_graph: Graph, __: VerificationTask
     ) -> tuple[bool, dict[str, object]]:
+        cache_key = id(h_graph)
+        cached = self._simple_path_cache.get(cache_key)
+        if cached is not None:
+            verdict, details = cached
+            return verdict, dict(details)
+
         degrees = self._degree_map(h_graph)
         incident_nodes = [node for node, degree in degrees.items() if degree > 0]
         deg1 = sum(1 for degree in degrees.values() if degree == 1)
@@ -458,7 +518,7 @@ class Verifier:
 
         if max_degree > 2 or deg1 != 2 or len(incident_nodes) == 0:
             verdict = False
-            return verdict, self._with_paper_meta(
+            details = self._with_paper_meta(
                 {
                     "deg1": deg1,
                     "deg2": deg2,
@@ -468,12 +528,14 @@ class Verifier:
                 },
                 predicate="simple_path",
             )
+            self._simple_path_cache[cache_key] = (verdict, details)
+            return verdict, dict(details)
 
         connected_incident, incident_count = self._incident_connectivity(h_graph)
         h_edges = edge_count(h_graph)
         acyclic_incident = h_edges == incident_count - 1
         verdict = connected_incident and acyclic_incident
-        return verdict, self._with_paper_meta(
+        details = self._with_paper_meta(
             {
                 "deg1": deg1,
                 "deg2": deg2,
@@ -485,6 +547,8 @@ class Verifier:
             },
             predicate="simple_path",
         )
+        self._simple_path_cache[cache_key] = (verdict, details)
+        return verdict, dict(details)
 
     def verify_hamiltonian_cycle(
         self, g_graph: Graph, h_graph: Graph, task: VerificationTask
